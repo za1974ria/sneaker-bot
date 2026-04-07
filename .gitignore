@@ -3,3 +3,11 @@
 __pycache__/
 .venv/
 venv/
+
+# Données volatiles
+data/*.db
+data/*.csv
+data/*.json
+logs/
+*.log
+scrape_cache.json

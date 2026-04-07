@@ -1,4 +1,0 @@
-produit,min,max,avg,source,marge,verdict
-Nike Air Max,50.0,200.0,120.0,150,-100.0,❌ IGNORE
-Nike Pegasus,75.0,90.0,81.0,120,-45.0,❌ IGNORE
-Nike ZoomX,60.0,190.0,138.0,90,-30.0,❌ IGNORE

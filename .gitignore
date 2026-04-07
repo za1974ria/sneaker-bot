@@ -11,3 +11,4 @@ data/*.json
 logs/
 *.log
 scrape_cache.json
+.env.save

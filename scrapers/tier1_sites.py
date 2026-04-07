@@ -440,50 +440,24 @@ class IntersportScraper:
             f"{self.BASE_URL}/recherche?text={q}",
         ]
         hits = _scrape_search_urls(self.SOURCE_NAME, brand, model, urls)
-        if hits:
+        if len(hits) > 1:
             return hits
-        try:
-            from scrapers.anti_bot_diag import detect_block_reason, dump_snapshot
-            from scrapers.hypermarches import _fetch_html_playwright
-
-            for url in urls:
-                html = _fetch_html_playwright(url, source_name=self.SOURCE_NAME)
-                if not html:
-                    dump_snapshot(self.SOURCE_NAME, url, "", "empty_html")
-                    continue
-                reason = detect_block_reason(html)
-                if reason:
-                    dump_snapshot(self.SOURCE_NAME, url, html, reason)
-                prices = extract_search_result_prices(html, brand, model)
-                for p in prices[:8]:
-                    hits.append(_build_hit(brand, model, p, self.SOURCE_NAME, url))
-                if hits:
-                    return hits
-        except Exception as e:  # noqa: BLE001
-            logger.debug("[%s] playwright fallback err: %s", self.SOURCE_NAME, e)
-        # Extra anti-bot layer for Intersport only.
-        try:
-            from scrapers.anti_bot_diag import (
-                fetch_playwright_stealth,
-                fetch_via_scraperapi,
-                fetch_with_rotating_headers,
-            )
-
-            for url in urls:
-                for html in (
-                    fetch_with_rotating_headers(url),
-                    fetch_playwright_stealth(url, source_name=self.SOURCE_NAME),
-                    fetch_via_scraperapi(url),
-                ):
-                    if not html:
-                        continue
-                    prices = extract_search_result_prices(html, brand, model)
-                    for p in prices[:8]:
-                        hits.append(_build_hit(brand, model, p, self.SOURCE_NAME, url))
-                    if hits:
-                        return hits
-        except Exception as e:  # noqa: BLE001
-            logger.debug("[%s] anti-bot extra err: %s", self.SOURCE_NAME, e)
+        # ScrapingBee render_js=true en priorité (Intersport SPA — Playwright timeout systématique)
+        bee_key = os.getenv("SCRAPINGBEE_API_KEY", "").strip()
+        if bee_key:
+            bee_url = f"{self.BASE_URL}/sn-IS/?text={q}"
+            try:
+                r = requests.get(
+                    "https://app.scrapingbee.com/api/v1/",
+                    params={"api_key": bee_key, "url": bee_url, "render_js": "true", "country_code": "fr", "wait": "2000"},
+                    timeout=45,
+                )
+                if r.status_code == 200 and r.text:
+                    prices = extract_search_result_prices(r.text, brand, model)
+                    if prices:
+                        return [_build_hit(brand, model, p, self.SOURCE_NAME, bee_url) for p in prices[:8]]
+            except Exception as e:  # noqa: BLE001
+                logger.warning("[Intersport] ScrapingBee erreur: %s", e)
         return hits
 
 

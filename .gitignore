@@ -5,10 +5,13 @@ __pycache__/
 venv/
 
 # Données volatiles
-data/*.db
-data/*.csv
-data/*.json
+data/
 logs/
 *.log
+*.csv
+*.db
+*.json
 scrape_cache.json
 .env.save
+log.txt
+*.save

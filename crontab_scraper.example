@@ -1,0 +1,3 @@
+# Ajouter avec : crontab -e
+# Scraping e-commerce toutes les 2 h → scrape_cache.json (Market Mode lit le cache)
+0 */2 * * * /root/sneaker_bot/venv/bin/python /root/sneaker_bot/run_scraper.py >> /root/sneaker_bot/scraper.log 2>&1

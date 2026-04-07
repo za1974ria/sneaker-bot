@@ -1,0 +1,35 @@
+[
+  {"name": "Courir", "domain": "courir.com", "category": "sneakers/sport", "status": "active", "coverage": "FR", "physical_presence": true, "store_count_estimate": 283, "store_locator_url": "https://www.courir.com/magasins", "note": "Source principale — scraping actif"},
+  {"name": "Foot Locker", "domain": "footlocker.fr", "category": "sneakers/sport", "status": "active", "coverage": "FR", "physical_presence": true, "store_count_estimate": 141, "store_locator_url": "https://magasins.footlocker.fr", "note": "Source forte Nike/Adidas — scraping actif"},
+  {"name": "Snipes", "domain": "snipes.com/fr", "category": "sneakers/streetwear", "status": "active", "coverage": "FR", "physical_presence": true, "store_count_estimate": 25, "store_locator_url": "https://www.snipes.com/fr-fr/magasins", "note": "Chemin FR public snipes.com/fr — scraping actif"},
+  {"name": "Sports Direct", "domain": "sportsdirect.com", "category": "sport/multimarques", "status": "active", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Complément — scraping actif"},
+
+  {"name": "JD Sports", "domain": "jdsports.fr", "category": "sneakers/sport", "status": "monitoring", "coverage": "FR", "physical_presence": true, "store_count_estimate": 120, "note": "Panorama boutiques FR — intégration scraping prioritaire"},
+  {"name": "Chausport", "domain": "chausport.com", "category": "sneakers/sport", "status": "monitoring", "coverage": "FR", "physical_presence": true, "store_count_estimate": 70, "note": "Réseau physique FR"},
+  {"name": "Sarenza", "domain": "sarenza.com", "category": "chaussures/sneakers", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Mode / sneakers FR"},
+  {"name": "Spartoo", "domain": "spartoo.com", "category": "chaussures/mode", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marketplace multimarques — veille prix"},
+  {"name": "Basket4Ballers", "domain": "basket4ballers.com", "category": "sneakers/basket", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Spécialiste basket FR"},
+  {"name": "Go Sport", "domain": "go-sport.com", "category": "sport/multimarques", "status": "monitoring", "coverage": "FR", "physical_presence": true, "store_count_estimate": 100, "note": "Multimarques FR"},
+  {"name": "Sport 2000", "domain": "sport2000.fr", "category": "sport/multimarques", "status": "monitoring", "coverage": "FR", "physical_presence": true, "store_count_estimate": 400, "note": "Réseau associatif FR"},
+  {"name": "Kickz FR", "domain": "kickz.com", "category": "sneakers", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Site kickz.com — catalogue FR sous /fr"},
+  {"name": "Footshop", "domain": "footshop.fr", "category": "sneakers", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Retailer sneakers FR"},
+  {"name": "i-Run", "domain": "i-run.fr", "category": "running/sport", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Running premium"},
+  {"name": "Alltricks", "domain": "alltricks.fr", "category": "sport/running", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Sport outdoor / running"},
+
+  {"name": "Nike", "domain": "nike.com/fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "Adidas", "domain": "adidas.fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "New Balance", "domain": "newbalance.fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "Puma", "domain": "fr.puma.com", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "ASICS", "domain": "asics.com/fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "Salomon", "domain": "salomon.com/fr-fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "Reebok", "domain": "reebok.eu/fr-fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "Converse", "domain": "converse.com/fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "Vans", "domain": "vans.fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "On Running", "domain": "on.com/fr-fr", "category": "marque officielle", "status": "monitoring", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Marque directe"},
+  {"name": "Courir Marketplace", "domain": "courir.com", "category": "sneakers/sport", "status": "monitoring", "coverage": "FR", "physical_presence": true, "store_count_estimate": 283, "note": "Extension marketplace Courir"},
+
+  {"name": "Decathlon", "domain": "decathlon.fr", "category": "sport/multimarques", "status": "disabled", "coverage": "FR", "physical_presence": true, "store_count_estimate": 300, "note": "Liste veille FR — scraping désactivé (bruit / anti-bot)"},
+  {"name": "Intersport", "domain": "intersport.fr", "category": "sport/multimarques", "status": "disabled", "coverage": "FR", "physical_presence": true, "store_count_estimate": 500, "note": "Liste veille FR — scraping désactivé (bruit)"},
+  {"name": "Zalando", "domain": "zalando.fr", "category": "mode/sneakers", "status": "disabled", "coverage": "FR", "physical_presence": false, "store_count_estimate": 0, "note": "Liste veille FR — matching modèle trop large, scraping off"},
+  {"name": "Sizeer", "domain": "sizeer.fr", "category": "sneakers", "status": "disabled", "coverage": "FR", "physical_presence": true, "store_count_estimate": 25, "note": "Scraping peu stable"}
+]

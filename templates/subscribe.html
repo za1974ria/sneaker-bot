@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="color-scheme" content="dark">
+  <title>Abonnement — SneakerBot</title>
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --card: #141414;
+      --border: #2a2a2a;
+      --text: #f4f4f5;
+      --muted: #9ca3af;
+      --accent: #00ff88;
+      --accent-dim: rgba(0, 255, 136, 0.12);
+      --danger: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      padding: 1rem 1rem 3rem;
+    }
+    a { color: var(--accent); }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    header.brand {
+      text-align: center;
+      margin-bottom: 1.5rem;
+      animation: fadeIn 0.5s ease;
+    }
+    header.brand .logo { font-size: 1.75rem; font-weight: 900; letter-spacing: -0.03em; }
+    header.brand .sub { color: var(--muted); font-size: 0.92rem; margin: 0.35rem 0 0; }
+
+    /* Progress */
+    .progress {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 2rem;
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+    .progress .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--border);
+      transition: background 0.35s ease, transform 0.35s ease;
+    }
+    .progress .dot.on {
+      background: var(--accent);
+      box-shadow: 0 0 12px rgba(0, 255, 136, 0.45);
+      transform: scale(1.15);
+    }
+    .progress .label { min-width: 5rem; text-align: center; }
+    .progress .sep { color: #444; }
+
+    /* Steps */
+    .step {
+      display: none;
+      opacity: 0;
+      transform: translateY(12px);
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+    .step.active {
+      display: block;
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    /* Cards grid */
+    .grid3 {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1rem;
+    }
+    @media (min-width: 860px) {
+      .grid3 { grid-template-columns: repeat(3, 1fr); align-items: stretch; }
+    }
+    @media (min-width: 1180px) {
+      .grid3 { grid-template-columns: repeat(4, 1fr); }
+    }
+    .offer {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.25rem 1.35rem;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    .offer:hover { border-color: #3f3f3f; }
+    .offer.featured {
+      border-color: rgba(0, 255, 136, 0.45);
+      box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.15), 0 16px 40px rgba(0, 0, 0, 0.45);
+    }
+    .badge-best {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      font-size: 0.7rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #fbbf24, #f59e0b);
+      color: #1a1003;
+      padding: 0.25rem 0.5rem;
+      border-radius: 999px;
+    }
+    .offer h2 { margin: 0 0 0.5rem; font-size: 1.05rem; color: var(--accent); }
+    .offer .price-line { font-size: 1.35rem; font-weight: 800; margin: 0.25rem 0; }
+    .offer .hint { color: var(--muted); font-size: 0.88rem; flex: 1; margin: 0.5rem 0 1rem; }
+    .btn-choose {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: none;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 0.95rem;
+      cursor: pointer;
+      background: var(--accent);
+      color: #052818;
+      transition: filter 0.15s ease, transform 0.1s ease;
+    }
+    .btn-choose:hover { filter: brightness(1.08); }
+    .btn-choose:active { transform: scale(0.98); }
+
+    /* 4e offre — clé en main (les 3 cartes ci-dessus inchangées) */
+    .offer.cle-en-main {
+      background: linear-gradient(var(--card), var(--card)) padding-box,
+        linear-gradient(145deg, #FFD700 0%, #daa520 50%, #b8860b 100%) border-box;
+      border: 2px solid transparent;
+      background-origin: border-box;
+      box-shadow: 0 0 24px rgba(255, 215, 0, 0.12);
+    }
+    .offer.cle-en-main:hover { box-shadow: 0 0 32px rgba(255, 215, 0, 0.22); }
+    .badge-sur-mesure {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      font-size: 0.65rem;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      background: linear-gradient(135deg, #FFD700, #f59e0b);
+      color: #1a1003;
+      padding: 0.3rem 0.55rem;
+      border-radius: 999px;
+    }
+    .offer.cle-en-main h2 {
+      color: #fde68a;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(255, 215, 0, 0.35);
+    }
+    .offer.cle-en-main .price-line { color: #fff; }
+    .offer.cle-en-main .cle-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      font-size: 0.84rem;
+      color: var(--muted);
+      flex: 1;
+    }
+    .offer.cle-en-main .cle-list li { margin: 0.45rem 0; }
+    .btn-contact {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 0.95rem;
+      cursor: pointer;
+      background: linear-gradient(135deg, #1a1508, #0d0d0d);
+      color: #FFD700;
+      border: 2px solid #FFD700;
+      transition: filter 0.15s ease, transform 0.1s ease, box-shadow 0.2s ease;
+      box-shadow: 0 0 16px rgba(255, 215, 0, 0.15);
+    }
+    .btn-contact:hover {
+      filter: brightness(1.12);
+      box-shadow: 0 0 24px rgba(255, 215, 0, 0.28);
+    }
+    .btn-contact:active { transform: scale(0.98); }
+
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 10002;
+      background: rgba(0, 0, 0, 0.82);
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-cle {
+      background: #0d0d0d;
+      border: 2px solid rgba(255, 215, 0, 0.55);
+      border-radius: 16px;
+      max-width: 440px;
+      width: 100%;
+      padding: 1.5rem 2.5rem 1.25rem 1.35rem;
+      position: relative;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+    }
+    .modal-cle h3 {
+      margin: 0 0 0.85rem;
+      font-size: 1.05rem;
+      color: #FFD700;
+    }
+    .modal-cle p { margin: 0.6rem 0; color: var(--muted); font-size: 0.92rem; line-height: 1.55; }
+    .modal-cle a { color: var(--accent); word-break: break-all; }
+    .modal-cle .modal-close {
+      position: absolute;
+      top: 8px;
+      right: 10px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 1.5rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0.35rem;
+    }
+    .modal-cle .modal-close:hover { color: #fff; }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.35rem 1.5rem;
+      max-width: 560px;
+      margin: 0 auto;
+    }
+    .panel.wide { max-width: 640px; }
+    h1.step-title { margin: 0 0 1rem; font-size: 1.15rem; color: var(--accent); }
+
+    .bank-box {
+      background: #0a0a0a;
+      border: 1px dashed rgba(0, 255, 136, 0.35);
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      font-size: 0.9rem;
+      margin-bottom: 1rem;
+      position: relative;
+    }
+    .bank-box h3 { margin: 0 0 0.65rem; font-size: 0.95rem; color: var(--accent); }
+    .bank-box p { margin: 0.35rem 0; word-break: break-all; }
+    .bank-box code { color: var(--accent); font-size: 0.88rem; }
+    .copy-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-top: 0.75rem;
+    }
+    .btn-copy {
+      font-size: 0.8rem;
+      padding: 0.4rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #1a1a1a;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .btn-copy:hover { border-color: var(--accent); color: var(--accent); }
+
+    .warn {
+      background: rgba(251, 191, 36, 0.1);
+      border: 1px solid rgba(251, 191, 36, 0.35);
+      color: #fde68a;
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      font-size: 0.88rem;
+      margin-bottom: 1rem;
+    }
+
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin: 1rem 0 0.4rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    label:first-of-type { margin-top: 0; }
+    input, select {
+      width: 100%;
+      padding: 0.7rem 0.85rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #0a0a0a;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    input:read-only { opacity: 0.85; color: var(--muted); }
+    .btn-submit {
+      margin-top: 1.25rem;
+      width: 100%;
+      padding: 0.85rem;
+      border: none;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #052818;
+      font-weight: 800;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-new-sub {
+      margin-top: 1.25rem;
+      width: 100%;
+      max-width: 320px;
+      padding: 0.95rem 1.25rem;
+      border: 2px solid var(--accent);
+      border-radius: 12px;
+      background: rgba(0, 255, 136, 0.14);
+      color: var(--accent);
+      font-weight: 900;
+      font-size: 1.02rem;
+      cursor: pointer;
+      box-shadow: 0 0 24px rgba(0, 255, 136, 0.2);
+      transition: filter 0.15s ease, transform 0.1s ease;
+    }
+    .btn-new-sub:hover { filter: brightness(1.12); }
+    .btn-new-sub:active { transform: scale(0.98); }
+    .btn-back {
+      margin-top: 1rem;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      width: 100%;
+      padding: 0.6rem;
+      border-radius: 10px;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+    .btn-back:hover { color: var(--text); border-color: #555; }
+
+    .success-box {
+      text-align: center;
+      padding: 1.5rem 1rem;
+    }
+    .success-box .big { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    .success-box h2 { margin: 0 0 0.75rem; color: var(--accent); font-size: 1.25rem; }
+    .success-box p { color: var(--muted); margin: 0.5rem 0; font-size: 0.95rem; }
+    .id-badge {
+      display: inline-block;
+      margin: 0.75rem 0;
+      padding: 0.35rem 0.85rem;
+      background: var(--accent-dim);
+      border: 1px solid rgba(0, 255, 136, 0.35);
+      border-radius: 999px;
+      font-weight: 800;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+    }
+    .footer-link { text-align: center; margin-top: 2rem; font-size: 0.88rem; }
+    .err-msg {
+      display: none;
+      background: rgba(248, 113, 113, 0.12);
+      border: 1px solid rgba(248, 113, 113, 0.4);
+      color: #fecaca;
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      margin-bottom: 1rem;
+      font-size: 0.88rem;
+    }
+    .err-msg.visible { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="brand">
+      <div class="logo">👟 SneakerBot</div>
+      <p class="sub">Abonnement — un seul parcours, une seule page</p>
+    </header>
+
+    <nav class="progress" aria-label="Étapes">
+      <span class="label" id="pl1">Offre</span>
+      <span class="dot on" id="d1" aria-hidden="true"></span>
+      <span class="sep">→</span>
+      <span class="label" id="pl2">Paiement</span>
+      <span class="dot" id="d2" aria-hidden="true"></span>
+      <span class="sep">→</span>
+      <span class="label" id="pl3">Confirmation</span>
+      <span class="dot" id="d3" aria-hidden="true"></span>
+    </nav>
+
+    <!-- ÉTAPE A -->
+    <section id="stepA" class="step active" aria-labelledby="titleA">
+      <h1 id="titleA" class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;">Choix de l'offre</h1>
+      <div class="grid3">
+        <article class="offer">
+          <h2>Essai gratuit</h2>
+          <p class="price-line">5 essais</p>
+          <p class="hint">Sans carte bancaire. Découvrez le comparateur et les signaux marché.</p>
+          <button type="button" class="btn-choose" data-plan="essai">Choisir</button>
+        </article>
+        <article class="offer">
+          <h2>Mensuel</h2>
+          <p class="price-line">29€<span style="font-size:0.85rem;font-weight:600;color:var(--muted)">/mois</span></p>
+          <p class="hint">+ 10 jours offerts sur demande après validation du paiement.</p>
+          <button type="button" class="btn-choose" data-plan="mensuel">Choisir</button>
+        </article>
+        <article class="offer featured">
+          <span class="badge-best">⭐ Meilleur</span>
+          <h2>Annuel</h2>
+          <p class="price-line">190€<span style="font-size:0.85rem;font-weight:600;color:var(--muted)">/an</span></p>
+          <p class="hint">Économisez 158€ par rapport au mensuel (réf. 29€ × 12).</p>
+          <button type="button" class="btn-choose" data-plan="annuel">Choisir</button>
+        </article>
+        <article class="offer cle-en-main">
+          <span class="badge-sur-mesure">SUR MESURE</span>
+          <h2>🔧 Clé en main</h2>
+          <p class="price-line">550€ <span style="font-size:0.85rem;font-weight:600;color:var(--muted)">paiement unique</span></p>
+          <ul class="cle-list">
+            <li>✅ Installation sur votre serveur</li>
+            <li>✅ Configuration personnalisée</li>
+            <li>✅ Formation incluse</li>
+            <li>✅ 30 jours support</li>
+            <li>✅ Code source inclus</li>
+            <li>✅ Vos propres marques et articles</li>
+          </ul>
+          <button type="button" class="btn-contact" id="btnCleModal" aria-haspopup="dialog">Nous contacter</button>
+        </article>
+      </div>
+    </section>
+
+    <!-- ÉTAPE B — payant -->
+    <section id="stepBpaid" class="step" aria-labelledby="titleBpaid">
+      <div class="panel wide">
+        <h1 id="titleBpaid" class="step-title">Paiement par virement</h1>
+        <div class="err-msg" id="errPaid" role="alert"></div>
+
+        <div class="bank-box" id="bankBlock">
+          <h3>Coordonnées bancaires</h3>
+          <p><strong>Bénéficiaire :</strong> Zakaria Chohra</p>
+          <p><strong>IBAN :</strong> <code id="ibanText">GB92CLJU04130740269255</code></p>
+          <p><strong>BIC :</strong> <code>CLJUGB21XXX</code></p>
+          <p><strong>Motif :</strong> <code id="motifPreview">SNK-votre@email.com</code></p>
+          <p><strong>Montant exact :</strong> <span id="amountLine">29€</span></p>
+          <div class="copy-row">
+            <button type="button" class="btn-copy" id="copyIban">Copier IBAN</button>
+            <button type="button" class="btn-copy" id="copyAll">Copier tout le bloc</button>
+          </div>
+        </div>
+
+        <p class="warn">Effectuez votre virement puis remplissez le formulaire ci-dessous. Notre équipe vérifie chaque paiement manuellement.</p>
+
+        <form id="formPaid" novalidate>
+          <label for="namePaid">Prénom et nom</label>
+          <input id="namePaid" name="name" type="text" required autocomplete="name" placeholder="Jean Dupont">
+
+          <div style="margin:16px 0">
+            <p style="color:#aaa;margin-bottom:8px">Comment voulez-vous recevoir vos accès ?</p>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <label style="cursor:pointer;display:flex;align-items:center;gap:8px">
+                <input type="radio" name="canalPaid" value="email" checked onchange="toggleCanalPaid(this.value)">
+                <span style="color:#fff">📧 Par Email</span>
+              </label>
+              <label style="cursor:pointer;display:flex;align-items:center;gap:8px">
+                <input type="radio" name="canalPaid" value="whatsapp" onchange="toggleCanalPaid(this.value)">
+                <span style="color:#25D366">📱 Par WhatsApp</span>
+              </label>
+              <label style="cursor:pointer;display:flex;align-items:center;gap:8px">
+                <input type="radio" name="canalPaid" value="both" onchange="toggleCanalPaid(this.value)">
+                <span style="color:#00ff88">📧📱 Les deux</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="field-email-paid">
+            <label for="emailPaid" style="color:#aaa;font-size:13px">Adresse Email *</label>
+            <input id="emailPaid" name="email" type="email" autocomplete="email" placeholder="votre@email.com"
+                   style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#fff;margin-top:4px">
+          </div>
+
+          <div id="field-whatsapp-paid" style="display:none;margin-top:12px">
+            <label for="waPaid" style="color:#aaa;font-size:13px">Numéro WhatsApp * (format: +33612345678)</label>
+            <input id="waPaid" name="whatsapp" type="tel" autocomplete="tel" placeholder="+33 6 12 34 56 78"
+                   style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#fff;margin-top:4px">
+          </div>
+
+          <label for="planPaid">Plan sélectionné</label>
+          <input id="planPaid" type="text" readonly value="">
+
+          <label for="refPaid">Référence de virement</label>
+          <input id="refPaid" name="reference" type="text" required placeholder="Référence figurant sur votre ordre de virement">
+
+          <button type="submit" class="btn-submit">Confirmer mon abonnement</button>
+          <button type="button" class="btn-back" id="backFromPaid">← Retour aux offres</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ÉTAPE B — essai -->
+    <section id="stepBfree" class="step" aria-labelledby="titleBfree">
+      <div class="panel">
+        <h1 id="titleBfree" class="step-title">Essai gratuit</h1>
+        <div class="err-msg" id="errFree" role="alert"></div>
+        <p style="color:var(--muted);font-size:0.92rem;margin:0 0 1rem;">Aucun paiement. Nous vous recontactons pour activer vos essais.</p>
+        <form id="formFree" novalidate>
+          <label for="nameFree">Prénom et nom</label>
+          <input id="nameFree" name="name" type="text" required autocomplete="name">
+
+          <div style="margin:16px 0">
+            <p style="color:#aaa;margin-bottom:8px">Comment voulez-vous recevoir vos accès ?</p>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+              <label style="cursor:pointer;display:flex;align-items:center;gap:8px">
+                <input type="radio" name="canalFree" value="email" checked onchange="toggleCanalFree(this.value)">
+                <span style="color:#fff">📧 Par Email</span>
+              </label>
+              <label style="cursor:pointer;display:flex;align-items:center;gap:8px">
+                <input type="radio" name="canalFree" value="whatsapp" onchange="toggleCanalFree(this.value)">
+                <span style="color:#25D366">📱 Par WhatsApp</span>
+              </label>
+              <label style="cursor:pointer;display:flex;align-items:center;gap:8px">
+                <input type="radio" name="canalFree" value="both" onchange="toggleCanalFree(this.value)">
+                <span style="color:#00ff88">📧📱 Les deux</span>
+              </label>
+            </div>
+          </div>
+
+          <div id="field-email-free">
+            <label for="emailFree" style="color:#aaa;font-size:13px">Adresse Email *</label>
+            <input id="emailFree" name="email" type="email" autocomplete="email" placeholder="votre@email.com"
+                   style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#fff;margin-top:4px">
+          </div>
+
+          <div id="field-whatsapp-free" style="display:none;margin-top:12px">
+            <label for="waFree" style="color:#aaa;font-size:13px">Numéro WhatsApp * (format: +33612345678)</label>
+            <input id="waFree" name="whatsapp" type="tel" autocomplete="tel" placeholder="+33 6 12 34 56 78"
+                   style="width:100%;padding:10px;background:#1a1a1a;border:1px solid #333;border-radius:6px;color:#fff;margin-top:4px">
+          </div>
+
+          <button type="submit" class="btn-submit">Démarrer mon essai gratuit</button>
+          <button type="button" class="btn-back" id="backFromFree">← Retour aux offres</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ÉTAPE C -->
+    <section id="stepC" class="step" aria-labelledby="titleC">
+      <div class="panel">
+        <div class="success-box">
+          <div class="big" aria-hidden="true">✅</div>
+          <h2 id="titleC">Demande reçue !</h2>
+          <p>Votre demande <span class="id-badge" id="reqId">#———</span> est enregistrée.</p>
+          <p>Vous serez recontacté sur le <strong>canal choisi</strong> (email et/ou WhatsApp). Les offres payantes sont activées après vérification du virement (souvent sous 24h). L’essai gratuit est traité dès réception de la demande.</p>
+          <p>📧 Pensez à vérifier vos spams / courrier indésirable.</p>
+          <button type="button" class="btn-new-sub" id="btnNewSubscription">Nouvel abonnement</button>
+        </div>
+        <p class="footer-link"><a href="/comparison">Accéder au site</a> · <a href="/subscribe">Nouvelle demande</a></p>
+      </div>
+    </section>
+  </div>
+
+  <div id="modalCle" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="modalCleTitle">
+    <div class="modal-cle">
+      <button type="button" class="modal-close" id="modalCleClose" aria-label="Fermer">×</button>
+      <h3 id="modalCleTitle">Offre Clé en main — 550€</h3>
+      <p>Pour l’offre Clé en main à 550€, contactez-nous directement :</p>
+      <p>📧 Email : <a href="mailto:zakaria.chohra@gmail.com">zakaria.chohra@gmail.com</a></p>
+      <p>📱 WhatsApp : <a href="https://wa.me/213540388413" rel="noopener noreferrer" target="_blank">+213 540 388 413</a></p>
+      <p style="margin-top:1rem;color:#a1a1aa;font-size:0.88rem;">Nous vous répondons sous 24h.</p>
+    </div>
+  </div>
+
+  <script>
+function toggleCanalPaid(value) {
+  var emailField = document.getElementById('field-email-paid');
+  var waField = document.getElementById('field-whatsapp-paid');
+  var emailInput = emailField.querySelector('input');
+  var waInput = waField.querySelector('input');
+  if (value === 'email') {
+    emailField.style.display = 'block';
+    waField.style.display = 'none';
+    emailInput.required = true;
+    waInput.required = false;
+  } else if (value === 'whatsapp') {
+    emailField.style.display = 'none';
+    waField.style.display = 'block';
+    emailInput.required = false;
+    waInput.required = true;
+  } else {
+    emailField.style.display = 'block';
+    waField.style.display = 'block';
+    emailInput.required = true;
+    waInput.required = true;
+  }
+  if (typeof window.syncMotif === 'function') window.syncMotif();
+}
+function toggleCanalFree(value) {
+  var emailField = document.getElementById('field-email-free');
+  var waField = document.getElementById('field-whatsapp-free');
+  var emailInput = emailField.querySelector('input');
+  var waInput = waField.querySelector('input');
+  if (value === 'email') {
+    emailField.style.display = 'block';
+    waField.style.display = 'none';
+    emailInput.required = true;
+    waInput.required = false;
+  } else if (value === 'whatsapp') {
+    emailField.style.display = 'none';
+    waField.style.display = 'block';
+    emailInput.required = false;
+    waInput.required = true;
+  } else {
+    emailField.style.display = 'block';
+    waField.style.display = 'block';
+    emailInput.required = true;
+    waInput.required = true;
+  }
+}
+(function () {
+  var stepA = document.getElementById('stepA');
+  var stepBpaid = document.getElementById('stepBpaid');
+  var stepBfree = document.getElementById('stepBfree');
+  var stepC = document.getElementById('stepC');
+  var d1 = document.getElementById('d1');
+  var d2 = document.getElementById('d2');
+  var d3 = document.getElementById('d3');
+  var pl2 = document.getElementById('pl2');
+
+  var selectedPlan = null;
+  var amountEuros = 0;
+
+  function showStep(which) {
+    [stepA, stepBpaid, stepBfree, stepC].forEach(function (el) {
+      el.classList.remove('active');
+    });
+    which.classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function setProgress(n) {
+    d1.classList.toggle('on', n >= 1);
+    d2.classList.toggle('on', n >= 2);
+    d3.classList.toggle('on', n >= 3);
+    pl2.textContent = (selectedPlan === 'essai') ? 'Formulaire' : 'Paiement';
+  }
+
+  function resetSubscribeWizard() {
+    selectedPlan = null;
+    amountEuros = 0;
+    showStep(stepA);
+    setProgress(1);
+    document.getElementById('formPaid').reset();
+    document.getElementById('formFree').reset();
+    toggleCanalPaid('email');
+    toggleCanalFree('email');
+    var cp = document.querySelector('input[name=canalPaid][value=email]');
+    var cf = document.querySelector('input[name=canalFree][value=email]');
+    if (cp) cp.checked = true;
+    if (cf) cf.checked = true;
+    syncMotif();
+    var errP = document.getElementById('errPaid');
+    var errF = document.getElementById('errFree');
+    errP.classList.remove('visible');
+    errP.textContent = '';
+    errF.classList.remove('visible');
+    errF.textContent = '';
+    document.getElementById('planPaid').value = '';
+    document.getElementById('amountLine').textContent = '29€';
+    document.getElementById('reqId').textContent = '#———';
+  }
+
+  var btnNewSub = document.getElementById('btnNewSubscription');
+  if (btnNewSub) btnNewSub.addEventListener('click', resetSubscribeWizard);
+
+  document.querySelectorAll('.btn-choose').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      selectedPlan = btn.getAttribute('data-plan');
+      if (selectedPlan === 'essai') {
+        showStep(stepBfree);
+        setProgress(2);
+        document.getElementById('errFree').classList.remove('visible');
+        document.getElementById('errFree').textContent = '';
+      } else {
+        amountEuros = selectedPlan === 'annuel' ? 190 : 29;
+        document.getElementById('planPaid').value = selectedPlan === 'mensuel'
+          ? 'Mensuel — 29€/mois'
+          : 'Annuel — 190€/an';
+        document.getElementById('amountLine').textContent = amountEuros + '\u00a0€';
+        showStep(stepBpaid);
+        setProgress(2);
+        document.getElementById('errPaid').classList.remove('visible');
+        syncMotif();
+      }
+    });
+  });
+
+  function syncMotif() {
+    var em = document.getElementById('emailPaid').value.trim();
+    var wa = document.getElementById('waPaid').value.trim();
+    var canalEl = document.querySelector('input[name="canalPaid"]:checked');
+    var canal = canalEl ? canalEl.value : 'email';
+    var tail = em;
+    if (!tail && canal === 'whatsapp' && wa) {
+      var d = wa.replace(/\D/g, '');
+      tail = d || 'identifiant';
+    }
+    if (!tail) tail = 'votre@email.com';
+    document.getElementById('motifPreview').textContent = 'SNK-' + tail;
+  }
+  window.syncMotif = syncMotif;
+  document.getElementById('emailPaid').addEventListener('input', syncMotif);
+  document.getElementById('waPaid').addEventListener('input', syncMotif);
+  document.querySelectorAll('input[name="canalPaid"]').forEach(function (r) {
+    r.addEventListener('change', syncMotif);
+  });
+  toggleCanalPaid('email');
+  toggleCanalFree('email');
+
+  document.getElementById('backFromPaid').addEventListener('click', function () {
+    showStep(stepA);
+    setProgress(1);
+  });
+  document.getElementById('backFromFree').addEventListener('click', function () {
+    showStep(stepA);
+    setProgress(1);
+  });
+
+  (function modalCle() {
+    var overlay = document.getElementById('modalCle');
+    var btn = document.getElementById('btnCleModal');
+    var closeBtn = document.getElementById('modalCleClose');
+    if (!overlay || !btn) return;
+
+    function open() {
+      overlay.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      if (closeBtn) closeBtn.focus();
+    }
+    function close() {
+      overlay.classList.remove('open');
+      document.body.style.overflow = '';
+    }
+
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      open();
+    });
+    if (closeBtn) closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) close();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && overlay.classList.contains('open')) close();
+    });
+  })();
+
+  document.getElementById('copyIban').addEventListener('click', function () {
+    var t = document.getElementById('ibanText').textContent;
+    navigator.clipboard.writeText(t).then(function () {
+      alert('IBAN copié');
+    }).catch(function () {});
+  });
+
+  document.getElementById('copyAll').addEventListener('click', function () {
+    var el = document.getElementById('bankBlock');
+    var txt = el ? el.innerText : '';
+    navigator.clipboard.writeText(txt).then(function () {
+      alert('Bloc copié');
+    }).catch(function () {});
+  });
+
+  function detailToMsg(detail) {
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      return detail.map(function (x) {
+        return (x && x.msg) ? x.msg : JSON.stringify(x);
+      }).join(' ');
+    }
+    return 'Erreur';
+  }
+
+  function postSubscribe(payload) {
+    return fetch('/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(function (r) {
+      return r.text().then(function (t) {
+        var j = {};
+        try { j = t ? JSON.parse(t) : {}; } catch (e) { j = {}; }
+        if (!r.ok) {
+          throw new Error(detailToMsg(j.detail) || j.message || ('HTTP ' + r.status));
+        }
+        return j;
+      });
+    });
+  }
+
+  document.getElementById('formPaid').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var err = document.getElementById('errPaid');
+    err.classList.remove('visible');
+    var btn = e.target.querySelector('.btn-submit');
+    btn.disabled = true;
+    var canalPaidEl = document.querySelector('input[name="canalPaid"]:checked');
+    postSubscribe({
+      name: document.getElementById('namePaid').value.trim(),
+      email: document.getElementById('emailPaid').value.trim(),
+      plan: selectedPlan,
+      reference: document.getElementById('refPaid').value.trim(),
+      whatsapp: document.getElementById('waPaid').value.trim(),
+      canal: canalPaidEl ? canalPaidEl.value : 'email'
+    }).then(function (data) {
+      document.getElementById('reqId').textContent = '#' + (data.id || '—');
+      showStep(stepC);
+      setProgress(3);
+    }).catch(function (x) {
+      err.textContent = x.message || 'Erreur';
+      err.classList.add('visible');
+    }).finally(function () {
+      btn.disabled = false;
+    });
+  });
+
+  document.getElementById('formFree').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var err = document.getElementById('errFree');
+    err.classList.remove('visible');
+    var btn = e.target.querySelector('.btn-submit');
+    btn.disabled = true;
+    var canalFreeEl = document.querySelector('input[name="canalFree"]:checked');
+    postSubscribe({
+      name: document.getElementById('nameFree').value.trim(),
+      email: document.getElementById('emailFree').value.trim(),
+      plan: 'essai',
+      reference: '',
+      whatsapp: document.getElementById('waFree').value.trim(),
+      canal: canalFreeEl ? canalFreeEl.value : 'email'
+    }).then(function (data) {
+      document.getElementById('reqId').textContent = '#' + (data.id || '—');
+      showStep(stepC);
+      setProgress(3);
+    }).catch(function (x) {
+      err.textContent = x.message || 'Erreur';
+      err.classList.add('visible');
+    }).finally(function () {
+      btn.disabled = false;
+    });
+  });
+})();
+  </script>
+</body>
+</html>

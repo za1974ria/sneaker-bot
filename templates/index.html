@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SneakerBot — Dashboard prix FR</title>
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --bg-elev: #141414;
+      --bg-row-alt: #111111;
+      --border: #262626;
+      --text: #e8e8e3;
+      --muted: #9ca3af;
+      --accent: #00ff88;
+      --accent-dim: rgba(0, 255, 136, 0.15);
+      --danger: #ff4466;
+      --radius: 12px;
+      --font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; font-family: var(--font); background: var(--bg); color: var(--text); }
+    a { color: var(--accent); }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 1rem 1.25rem 2rem; }
+    /* Header */
+    header.top {
+      display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+      gap: 1rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border);
+    }
+    .brand-block h1 { margin: 0; font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em; }
+    .brand-block .sub { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+    .header-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.35rem 0.75rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600;
+      border: 1px solid var(--border); background: var(--bg-elev);
+    }
+    .badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .badge.online .dot { background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+    .badge.offline .dot { background: var(--danger); }
+    .btn {
+      font-family: inherit; cursor: pointer; border: none; border-radius: var(--radius);
+      padding: 0.55rem 1rem; font-weight: 700; font-size: 0.875rem;
+      display: inline-flex; align-items: center; gap: 0.4rem; transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary {
+      background: linear-gradient(135deg, #00cc6a, var(--accent)); color: #052818;
+    }
+    .btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+    .btn-export {
+      background: linear-gradient(135deg, #1a4d6e, #2563eb); color: #e0f2fe;
+      text-decoration: none; font-size: 0.8rem; padding: 0.45rem 0.85rem; border-radius: var(--radius);
+      font-weight: 700; display: inline-flex; align-items: center; gap: 0.35rem;
+      border: 1px solid rgba(37, 99, 235, 0.5);
+    }
+    .btn-export:hover { filter: brightness(1.08); color: #fff; }
+    .btn-export-green {
+      background: linear-gradient(135deg, #065f46, var(--accent)); color: #052818;
+      border-color: rgba(0, 255, 136, 0.4);
+    }
+    .header-exports {
+      width: 100%; margin-top: 0.65rem; padding-top: 0.75rem; border-top: 1px solid var(--border);
+      display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; justify-content: flex-end;
+    }
+    .btn-alerts-badge {
+      font-family: inherit; cursor: pointer; border: none; border-radius: 999px;
+      padding: 0.45rem 0.9rem; font-weight: 800; font-size: 0.8rem;
+      background: #3f1518; color: #fecaca; border: 1px solid var(--danger);
+      display: none; align-items: center; gap: 0.35rem;
+    }
+    .btn-alerts-badge.visible { display: inline-flex; }
+    .modal-alerts-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.78); z-index: 10002;
+      align-items: center; justify-content: center; padding: 1rem;
+    }
+    .modal-alerts-overlay.open { display: flex; }
+    .modal-alerts {
+      background: #141414; border: 1px solid var(--border); border-radius: 16px; width: 100%; max-width: 520px;
+      max-height: 85vh; overflow: hidden; display: flex; flex-direction: column;
+      box-shadow: 0 24px 80px rgba(0,0,0,0.55);
+    }
+    .modal-alerts-head {
+      padding: 1rem 1.15rem; border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
+    }
+    .modal-alerts-head h3 { margin: 0; font-size: 1.05rem; color: var(--accent); }
+    .modal-alerts-body { padding: 0.75rem 1rem 1rem; overflow-y: auto; flex: 1; }
+    .alert-row {
+      padding: 0.65rem 0.75rem; border-radius: 10px; margin-bottom: 0.5rem;
+      background: var(--bg-row-alt); border: 1px solid var(--border); font-size: 0.86rem;
+    }
+    .alert-row .tag-hausse { color: #fecaca; font-weight: 800; }
+    .alert-row .tag-baisse { color: #86efac; font-weight: 800; }
+    .modal-alerts-actions { padding: 0.75rem 1rem; border-top: 1px solid var(--border); display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    /* Offline banner */
+    .banner-offline {
+      display: none; background: rgba(255, 68, 102, 0.12); border: 1px solid var(--danger);
+      color: #fecaca; padding: 0.75rem 1rem; border-radius: var(--radius); margin-bottom: 1rem; font-weight: 600;
+    }
+    .banner-offline.visible { display: block; }
+    /* Stats grid */
+    .stats-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem;
+      margin: 1.25rem 0 1.5rem;
+    }
+    .stat-card {
+      background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 1rem 1.1rem;
+    }
+    .stat-card .label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.35rem; }
+    .stat-card .value { font-size: 1.35rem; font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+    .stat-card .hint { font-size: 0.78rem; color: var(--muted); margin-top: 0.25rem; }
+    /* Toolbar */
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; margin-bottom: 1rem;
+    }
+    .field { display: flex; flex-direction: column; gap: 0.25rem; flex: 1; min-width: 160px; }
+    .field label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
+    .field input, .field select {
+      background: var(--bg); border: 1px solid var(--border); color: var(--text);
+      padding: 0.55rem 0.75rem; border-radius: 10px; font-family: inherit; font-size: 0.9rem;
+    }
+    .field input:focus, .field select:focus { outline: 2px solid var(--accent-dim); border-color: var(--accent); }
+    /* Table */
+    .table-wrap {
+      border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+      background: var(--bg-elev); position: relative; min-height: 200px;
+    }
+    .table-loader {
+      position: absolute; inset: 0; background: rgba(13,13,13,0.75); display: none;
+      align-items: center; justify-content: center; z-index: 2;
+    }
+    .table-loader.visible { display: flex; }
+    .spinner {
+      width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    table.data { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    table.data th {
+      text-align: left; padding: 0.75rem 0.85rem; background: #0a0a0a; color: var(--muted);
+      font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--border);
+    }
+    table.data td { padding: 0.65rem 0.85rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    table.data tbody tr { cursor: pointer; transition: background 0.12s; }
+    table.data tbody tr:nth-child(even) { background: var(--bg-row-alt); }
+    table.data tbody tr:hover { background: var(--accent-dim); }
+    .price { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+    .empty-state { padding: 2.5rem 1rem; text-align: center; color: var(--muted); }
+    .pagination {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 0.75rem; margin-top: 1rem;
+    }
+    .pagination .pages { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+    .pagination button {
+      font-family: inherit; background: var(--bg-elev); border: 1px solid var(--border); color: var(--text);
+      padding: 0.4rem 0.75rem; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 0.85rem;
+    }
+    .pagination button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .pagination button.active { border-color: var(--accent); color: var(--accent); }
+    /* Scrape section */
+    .section-scrape {
+      margin-top: 2rem; padding: 1.25rem; border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg-elev);
+    }
+    .section-scrape h2 { margin: 0 0 0.75rem; font-size: 1rem; color: var(--accent); }
+    .section-google {
+      margin: 1.25rem 0; padding: 1.25rem; border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg-elev);
+    }
+    .section-google h2 { margin: 0 0 0.75rem; font-size: 1rem; color: var(--accent); }
+    .google-grid { display: grid; gap: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+    .google-grid strong { color: var(--text); }
+    .scrape-grid { display: grid; gap: 0.5rem; font-size: 0.9rem; color: var(--muted); }
+    .scrape-grid strong { color: var(--text); }
+    .log-err { color: var(--danger); font-size: 0.85rem; margin-top: 0.5rem; }
+    /* Modal */
+    .modal-backdrop {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.72); z-index: 100;
+      align-items: center; justify-content: center; padding: 1rem;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: #161616; border: 1px solid var(--border); border-radius: 16px; max-width: 560px; width: 100%;
+      max-height: 90vh; overflow: auto; box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+    }
+    .modal-head { padding: 1.1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+    .modal-head h3 { margin: 0; font-size: 1.05rem; }
+    .modal-body { padding: 1rem 1.25rem 1.25rem; }
+    .modal-history-cta {
+      display: block; width: 100%; box-sizing: border-box; text-align: center;
+      margin: 1rem 0 0.5rem; background: #00ff88; color: #000; border: none;
+      padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: 800;
+      font-size: 0.9rem;
+    }
+    .modal-history-cta:hover { filter: brightness(1.05); }
+    .modal .close-x { background: none; border: none; color: var(--muted); font-size: 1.5rem; cursor: pointer; line-height: 1; }
+    .highlight-prices { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+    .hp { flex: 1; min-width: 90px; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 0.65rem; text-align: center; }
+    .hp .lbl { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; }
+    .hp .num { font-size: 1.15rem; font-weight: 800; color: var(--accent); margin-top: 0.2rem; }
+    table.sources-mini { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-top: 0.5rem; }
+    table.sources-mini th, table.sources-mini td { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border); text-align: left; }
+    td.conf-cell { white-space: nowrap; font-size: 0.82rem; }
+    td.conf-cell small { color: var(--muted); font-weight: 600; }
+    /* Toast */
+    .toast-wrap { position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 200; display: flex; flex-direction: column; gap: 0.5rem; max-width: min(360px, 92vw); }
+    .toast {
+      padding: 0.75rem 1rem; border-radius: 10px; font-size: 0.88rem; font-weight: 600;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45); animation: toastIn 0.25s ease;
+    }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } }
+    .toast.ok { background: #0d2818; border: 1px solid var(--accent); color: #86efac; }
+    .toast.err { background: #2a1215; border: 1px solid var(--danger); color: #fecaca; }
+    footer.site-footer { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); text-align: center; }
+    #mascotte-container {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.35rem;
+      pointer-events: none;
+    }
+    #mascotte-container .mascotte-face {
+      font-size: 2.75rem;
+      line-height: 1;
+      filter: drop-shadow(0 4px 12px rgba(0, 255, 136, 0.25));
+      pointer-events: auto;
+      cursor: default;
+    }
+    #mascotte-container .mascotte-badge {
+      font-size: 0.65rem;
+      font-weight: 800;
+      color: var(--accent);
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.25rem 0.5rem;
+      letter-spacing: 0.04em;
+      pointer-events: auto;
+      white-space: nowrap;
+    }
+    #mascotte-container .mascotte-tooltip {
+      position: absolute;
+      top: 75px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="bannerOffline" class="banner-offline" role="alert">Serveur inaccessible — vérifiez que l’API SneakerBot est démarrée.</div>
+
+    <header class="top">
+      <div class="brand-block">
+        <h1>👟 SneakerBot</h1>
+        <p class="sub">Suivi des prix en temps réel — marché FR</p>
+      </div>
+      <div class="header-actions">
+        <span id="serverBadge" class="badge offline" aria-live="polite"><span class="dot"></span><span id="serverBadgeText">Hors ligne</span></span>
+        <button type="button" class="btn btn-primary" id="btnScrape" title="Lance un scraping complet (run_market)">
+          <span id="btnScrapeIcon">🔄</span> Forcer scraping
+        </button>
+        <button type="button" class="btn-alerts-badge" id="btnAlertsBadge" title="Alertes prix" aria-live="polite">
+          🔔 <span id="alertsUnseenCount">0</span> alerte(s)
+        </button>
+      </div>
+      <div class="header-exports" aria-label="Exports e-commerce">
+        <a class="btn-export btn-export-green" href="/api/export/woocommerce-csv">📥 WooCommerce CSV</a>
+        <a class="btn-export" href="/api/export/woocommerce-json">📥 WooCommerce JSON</a>
+        <a class="btn-export" href="/api/export/prestashop-csv">📥 PrestaShop CSV</a>
+      </div>
+    </header>
+
+    <section class="stats-grid" aria-label="Indicateurs">
+      <div class="stat-card">
+        <div class="label">Modèles suivis (catalogue)</div>
+        <div class="value" id="statCatalog">—</div>
+        <div class="hint" id="statCsvHint">Avec prix CSV : —</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Dernière mise à jour</div>
+        <div class="value" id="statLastUp" style="font-size:1rem;">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Prix moyen global</div>
+        <div class="value" id="statAvg">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Scheduler</div>
+        <div class="value" id="statSched" style="font-size:1rem;">—</div>
+      </div>
+    </section>
+
+    <section class="section-google" aria-labelledby="googleTitle">
+      <h2 id="googleTitle">🛒 Google Shopping — Vérification externe</h2>
+      <div class="google-grid">
+        <div>Taux de fiabilité (OK / total) : <strong id="googleFiab">—</strong></div>
+        <div>OK : <strong id="googleOk">—</strong> · Suspects : <strong id="googleSus">—</strong> · Invalides : <strong id="googleInv">—</strong> · Total vérifs : <strong id="googleTot">—</strong></div>
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:0.75rem;">
+          <button type="button" class="btn btn-primary" id="btnGoogleVerify">Vérifier maintenant</button>
+          <span id="googleVerifyMsg" style="font-size:0.85rem;color:var(--muted);"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="toolbar" aria-label="Filtres">
+      <div class="field" style="flex:2; min-width:220px;">
+        <label for="searchInput">Recherche</label>
+        <input type="search" id="searchInput" placeholder="Marque ou modèle…" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="brandFilter">Marque</label>
+        <select id="brandFilter">
+          <option value="">Toutes les marques</option>
+          <option>Nike</option>
+          <option>Adidas</option>
+          <option>New Balance</option>
+          <option>Puma</option>
+          <option>Reebok</option>
+          <option>Salomon</option>
+          <option>Asics</option>
+          <option>Vans</option>
+          <option>Converse</option>
+          <option>On Running</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="sortSelect">Trier par</label>
+        <select id="sortSelect">
+          <option value="name-asc">Nom A → Z</option>
+          <option value="price-asc">Prix moyen croissant</option>
+          <option value="price-desc">Prix moyen décroissant</option>
+        </select>
+      </div>
+      <div class="field" style="flex:0; min-width:auto;">
+        <label>&nbsp;</label>
+        <button type="button" class="btn btn-ghost" id="btnShowAll">Tout afficher</button>
+      </div>
+    </section>
+
+    <div class="table-wrap">
+      <div id="tableLoader" class="table-loader"><div class="spinner" aria-hidden="true"></div></div>
+      <table class="data" aria-label="Prix sneakers">
+        <thead>
+          <tr>
+            <th>Marque</th>
+            <th>Modèle</th>
+            <th>Prix min</th>
+            <th>Prix moy.</th>
+            <th>Prix max</th>
+            <th>Sources</th>
+            <th>Màj</th>
+            <th>Confiance</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+      <div id="emptyState" class="empty-state" style="display:none;"></div>
+    </div>
+
+    <div class="pagination">
+      <span id="pageInfo" style="color:var(--muted); font-size:0.85rem;"></span>
+      <div class="pages" id="pageButtons"></div>
+    </div>
+
+    <section class="section-scrape" aria-labelledby="scrapeTitle">
+      <h2 id="scrapeTitle">📡 Statut scraping</h2>
+      <div class="scrape-grid">
+        <div>Dernier run : <strong id="scrapeLast">—</strong></div>
+        <div>Modèles dans <code>market_fr.csv</code> : <strong id="scrapeModels">—</strong></div>
+        <div>Message : <strong id="scrapeMsg">—</strong></div>
+        <div>Prochain run agrégat : <strong id="scrapeNext">—</strong></div>
+      </div>
+      <div id="scrapeErr" class="log-err" style="display:none;"></div>
+    </section>
+
+    <footer class="site-footer">
+      SneakerBot v2.0 — Données marché FR — <span id="footerTs">—</span>
+      <br />
+      <a href="/liens" style="color: var(--accent); margin-top: 0.5rem; display: inline-block;">Tous les liens (dashboard, comparateur, API…)</a>
+    </footer>
+  </div>
+
+  <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modalTitle">Détail</h3>
+        <button type="button" class="close-x" id="modalClose" aria-label="Fermer">×</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
+
+  <div id="mascotte-container" title="Suivi prix sneakers — marché FR">
+    <span class="mascotte-face" aria-hidden="true">👟</span>
+    <span class="mascotte-badge">3 corrections appliquées ✅</span>
+    <div class="mascotte-tooltip"></div>
+  </div>
+
+  <div id="modal-alerts-overlay" class="modal-alerts-overlay" role="dialog" aria-modal="true" aria-labelledby="modalAlertsTitle">
+    <div class="modal-alerts">
+      <div class="modal-alerts-head">
+        <h3 id="modalAlertsTitle">🔔 Alertes prix</h3>
+        <button type="button" class="close-x" id="modalAlertsClose" aria-label="Fermer">×</button>
+      </div>
+      <div class="modal-alerts-body" id="modalAlertsBody">
+        <p class="muted" style="margin:0;">Chargement…</p>
+      </div>
+      <div class="modal-alerts-actions">
+        <button type="button" class="btn btn-primary" id="btnAlertsMarkAll">Tout marquer comme vu</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-history-overlay" style="
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.85);
+    z-index:10001;
+    justify-content:center;
+    align-items:center;
+  ">
+    <div style="
+        background:#1a1a1a;
+        border:1px solid #333;
+        border-radius:12px;
+        padding:24px;
+        width:90%;
+        max-width:600px;
+        max-height:80vh;
+        overflow-y:auto;
+        position:relative;
+    ">
+      <button type="button" onclick="window.__closeHistoryModal && window.__closeHistoryModal()" style="
+          position:absolute; top:12px; right:12px;
+          background:#333; color:#fff; border:none;
+          border-radius:50%; width:28px; height:28px;
+          cursor:pointer; font-size:16px;">✕</button>
+
+      <h3 style="color:#00ff88; margin:0 0 16px">
+          📊 Historique des prix — <span id="history-modal-title"></span>
+      </h3>
+
+      <div id="history-modal-body">
+          <p style="color:#666">Chargement...</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-wrap" id="toasts" aria-live="polite"></div>
+
+  <script>
+(function () {
+  const API = '';
+  const PAGE_SIZE = 20;
+  const FETCH_TIMEOUT_MS = 15000;
+  const GOOGLE_VERIFY_TIMEOUT_MS = 600000;
+  const STATS_REFRESH_MS = 5 * 60 * 1000;
+  const SEARCH_DEBOUNCE_MS = 400;
+
+  let allItems = [];
+  let viewMode = 'all';
+  let searchResults = [];
+  let currentPage = 1;
+  let sortKey = 'name-asc';
+  let brandFilter = '';
+  let searchQuery = '';
+  let scrapeRunning = false;
+  let statsTimer = null;
+  let searchTimer = null;
+
+  function toast(msg, type) {
+    const w = document.getElementById('toasts');
+    const t = document.createElement('div');
+    t.className = 'toast ' + (type === 'ok' ? 'ok' : 'err');
+    t.textContent = msg;
+    w.appendChild(t);
+    setTimeout(function () { t.remove(); }, 5000);
+  }
+
+  async function fetchJsonLong(path, options, timeoutMs) {
+    const ctrl = new AbortController();
+    const id = setTimeout(function () { ctrl.abort(); }, timeoutMs || GOOGLE_VERIFY_TIMEOUT_MS);
+    try {
+      const res = await fetch(API + path, Object.assign({ signal: ctrl.signal }, options || {}));
+      clearTimeout(id);
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { const j = await res.json(); detail = j.detail || j.error || detail; } catch (e) {}
+        throw new Error(detail || ('HTTP ' + res.status));
+      }
+      return await res.json();
+    } catch (e) {
+      clearTimeout(id);
+      if (e.name === 'AbortError') throw new Error('Délai dépassé');
+      throw e;
+    }
+  }
+
+  async function fetchJson(path, options) {
+    const ctrl = new AbortController();
+    const id = setTimeout(function () { ctrl.abort(); }, FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(API + path, Object.assign({ signal: ctrl.signal }, options || {}));
+      clearTimeout(id);
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { const j = await res.json(); detail = j.detail || j.error || detail; } catch (e) {}
+        throw new Error(detail || ('HTTP ' + res.status));
+      }
+      return await res.json();
+    } catch (e) {
+      clearTimeout(id);
+      if (e.name === 'AbortError') throw new Error('Délai dépassé');
+      throw e;
+    }
+  }
+
+  async function postJson(path, bodyObj) {
+    const ctrl = new AbortController();
+    const id = setTimeout(function () { ctrl.abort(); }, FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(API + path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(bodyObj != null ? bodyObj : {}),
+        signal: ctrl.signal,
+      });
+      clearTimeout(id);
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { const j = await res.json(); detail = j.detail || j.error || detail; } catch (e2) {}
+        throw new Error(detail || ('HTTP ' + res.status));
+      }
+      return await res.json();
+    } catch (e) {
+      clearTimeout(id);
+      if (e.name === 'AbortError') throw new Error('Délai dépassé');
+      throw e;
+    }
+  }
+
+  async function loadAlertsCount() {
+    try {
+      const c = await fetchJson('/api/alerts/count');
+      var u = c.unseen != null ? Number(c.unseen) : 0;
+      var badge = document.getElementById('btnAlertsBadge');
+      var num = document.getElementById('alertsUnseenCount');
+      if (num) num.textContent = String(u);
+      if (badge) {
+        if (u > 0) badge.classList.add('visible');
+        else badge.classList.remove('visible');
+      }
+    } catch (e) { /* optionnel */ }
+  }
+
+  function openAlertsModal() {
+    var ov = document.getElementById('modal-alerts-overlay');
+    if (!ov) return;
+    ov.classList.add('open');
+    var bodyEl = document.getElementById('modalAlertsBody');
+    bodyEl.innerHTML = '<p class="muted" style="margin:0;">Chargement…</p>';
+    fetchJson('/api/alerts?limit=50')
+      .then(function (d) {
+        var alerts = d.alerts || [];
+        if (!alerts.length) {
+          bodyEl.innerHTML = '<p class="muted">Aucune alerte enregistrée.</p>';
+          return;
+        }
+        bodyEl.innerHTML = alerts.map(function (a) {
+          var up = a.alert_type === 'hausse';
+          var icon = up ? '📈' : '📉';
+          var cls = up ? 'tag-hausse' : 'tag-baisse';
+          var pct = a.change_pct != null ? Number(a.change_pct).toFixed(1) : '?';
+          var oldP = a.old_price != null ? Number(a.old_price).toFixed(2) : '?';
+          var newP = a.new_price != null ? Number(a.new_price).toFixed(2) : '?';
+          var seen = a.seen ? ' <span class="muted">(vu)</span>' : '';
+          return '<div class="alert-row">' +
+            '<span class="' + cls + '">' + icon + ' ' + escapeHtml(String(a.alert_type || '')) + '</span>' +
+            ' · <strong>' + escapeHtml(String(a.brand || '')) + '</strong> ' + escapeHtml(String(a.model || '')) + seen + '<br>' +
+            '<span class="muted">' + oldP + '\u00a0€ → ' + newP + '\u00a0€</span> ' +
+            '<span class="' + cls + '">(' + (Number(pct) >= 0 ? '+' : '') + pct + '%)</span><br>' +
+            '<span class="muted" style="font-size:0.78rem;">' + escapeHtml(String(a.detected_at || '')) + '</span></div>';
+        }).join('');
+      })
+      .catch(function () {
+        bodyEl.innerHTML = '<p style="color:var(--danger)">Erreur chargement alertes.</p>';
+      });
+  }
+
+  function closeAlertsModal() {
+    var ov = document.getElementById('modal-alerts-overlay');
+    if (ov) ov.classList.remove('open');
+  }
+
+  function cleanModelName(brand, model) {
+    if (!model) return '';
+    const b = String(brand || '').trim();
+    const m = String(model);
+    if (!b) return m.trim();
+    const brandLower = b.toLowerCase();
+    const modelLower = m.toLowerCase();
+    if (modelLower.startsWith(brandLower)) {
+      return m.substring(b.length).trim();
+    }
+    return m.trim();
+  }
+
+  function normalizeSneakerListPayload(data) {
+    if (!data || typeof data !== 'object') return [];
+    if (Array.isArray(data)) return data;
+    var direct = [data.items, data.results, data.data, data.sneakers, data.rows, data.models];
+    for (var i = 0; i < direct.length; i++) {
+      var c = direct[i];
+      if (Array.isArray(c)) return c;
+      if (c && typeof c === 'object' && Array.isArray(c.items)) return c.items;
+    }
+    return [];
+  }
+
+  function formatEuro(n) {
+    if (n === null || n === undefined || n === '') return '—';
+    const x = Number(String(n).replace(',', '.'));
+    if (Number.isNaN(x)) return '—';
+    return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(x);
+  }
+
+  function renderConfidence(conf) {
+    if (!conf) return '<span style="color:#666">—</span>';
+    const stars = '★'.repeat(conf.stars) + '☆'.repeat(5 - conf.stars);
+    const colors = { green: '#00ff88', yellow: '#ffd700', orange: '#ff8c00', red: '#ff4444' };
+    const color = colors[conf.color] || '#666';
+    const d = conf.details || {};
+    const tipParts = [
+      conf.label + ' (' + conf.score + '/100)',
+      'Sources: ' + (d.sources != null ? d.sources : '?') + ' pts',
+      'Cohérence: ' + (d.coherence != null ? d.coherence : '?') + ' pts',
+      'Fraîcheur: ' + (d.freshness != null ? d.freshness : '?') + ' pts',
+      'IA Groq: ' + (d.groq != null ? d.groq : '?') + ' pts'
+    ];
+    if (d.claude != null) tipParts.push('Claude (max 5): ' + d.claude + ' pts');
+    const tip = tipParts.join(' | ');
+    return '<span style="color:' + color + '" title="' + escapeAttr(tip) + '">' +
+      stars + ' <small>' + conf.score + '/100</small></span>';
+  }
+
+  function renderConfidenceDetail(conf) {
+    if (!conf) return '';
+    const colors = { green: '#00ff88', yellow: '#ffd700', orange: '#ff8c00', red: '#ff4444' };
+    const barColor = colors[conf.color] || '#666';
+    const d = conf.details || {};
+    const rows = [
+      ['Sources (max 40)', d.sources],
+      ['Cohérence des prix (max 25)', d.coherence],
+      ['Fraîcheur des données (max 20)', d.freshness],
+      ['Validation IA Groq (max 10)', d.groq],
+      ['Fourchette réaliste (max 5)', d.price_range]
+    ];
+    if (d.claude != null) {
+      rows.push(['Second avis Claude, complément crédibilité (max 5)', d.claude]);
+    }
+    let listHtml = '<ul class="conf-criteria" style="margin:0.5rem 0 0;padding-left:1.1rem;font-size:0.82rem;color:var(--muted);">';
+    rows.forEach(function (pair) {
+      listHtml += '<li><strong style="color:var(--text);">' + escapeHtml(String(pair[0])) + '</strong> : ' +
+        escapeHtml(String(pair[1] != null ? pair[1] : '—')) + ' pts</li>';
+    });
+    listHtml += '</ul>';
+    return '<div class="conf-block" style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);">' +
+      '<h4 style="margin:0 0 0.5rem;font-size:0.85rem;color:var(--accent);">Score de confiance</h4>' +
+      '<p style="margin:0 0 0.5rem;font-size:0.9rem;"><span style="color:' + barColor + ';font-weight:800;">' +
+      escapeHtml(conf.label) + '</span> · ' + conf.score + '/100</p>' +
+      '<div style="height:10px;background:#222;border-radius:6px;overflow:hidden;border:1px solid var(--border);">' +
+      '<div style="height:100%;width:' + Math.min(100, Math.max(0, conf.score)) + '%;background:' + barColor + ';"></div></div>' +
+      listHtml + '</div>';
+  }
+
+  function formatDateFr(ts) {
+    if (!ts) return '—';
+    try {
+      const d = new Date(ts);
+      if (Number.isNaN(d.getTime())) {
+        if (typeof ts === 'string' && ts.match(/\d{4}/)) return ts;
+        return String(ts);
+      }
+      return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(d);
+    } catch (e) { return String(ts); }
+  }
+
+  function nextHourlyRunText() {
+    const now = new Date();
+    const next = new Date(now);
+    next.setMinutes(0, 0, 0);
+    if (now.getMinutes() > 0 || now.getSeconds() > 0) next.setHours(next.getHours() + 1);
+    return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'short' }).format(next);
+  }
+
+  function setOnline(ok) {
+    const b = document.getElementById('serverBadge');
+    const t = document.getElementById('serverBadgeText');
+    const ban = document.getElementById('bannerOffline');
+    if (ok) {
+      b.classList.add('online'); b.classList.remove('offline');
+      t.textContent = 'En ligne';
+      ban.classList.remove('visible');
+    } else {
+      b.classList.remove('online'); b.classList.add('offline');
+      t.textContent = 'Hors ligne';
+      ban.classList.add('visible');
+    }
+  }
+
+  async function loadHealth() {
+    try {
+      const h = await fetchJson('/health');
+      setOnline(h.status === 'ok');
+      return h;
+    } catch (e) {
+      setOnline(false);
+      throw e;
+    }
+  }
+
+  async function loadStats() {
+    try {
+      const h = await loadHealth();
+      const s = await fetchJson('/api/analytics/stats');
+      document.getElementById('statCatalog').textContent = s.total_models_catalog != null ? String(s.total_models_catalog) : '—';
+      document.getElementById('statCsvHint').textContent = 'Avec prix CSV : ' + (s.total_rows_market_fr_csv != null ? s.total_rows_market_fr_csv : '—');
+      document.getElementById('statLastUp').textContent = formatDateFr(s.last_update);
+      document.getElementById('statAvg').textContent = s.avg_price_all != null ? formatEuro(s.avg_price_all) : '—';
+      document.getElementById('statSched').textContent = h.scheduler === 'running' ? 'Actif' : 'Inactif';
+      if (s.top_brands && s.top_brands.length) {
+        const sel = document.getElementById('brandFilter');
+        const existing = new Set(Array.from(sel.options).map(function (o) { return o.value; }));
+        s.top_brands.forEach(function (tb) {
+          if (tb.brand && !existing.has(tb.brand)) {
+            const o = document.createElement('option');
+            o.value = tb.brand;
+            o.textContent = tb.brand;
+            sel.appendChild(o);
+            existing.add(tb.brand);
+          }
+        });
+      }
+      document.getElementById('footerTs').textContent = 'Page : ' + new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short', timeStyle: 'medium' }).format(new Date());
+      return s;
+    } catch (e) {
+      toast('Stats / santé : ' + e.message, 'err');
+      throw e;
+    }
+  }
+
+  async function loadScrapeStatus() {
+    try {
+      const st = await fetchJson('/api/scrape/status');
+      const fr = st.fr_update_status || {};
+      scrapeRunning = !!fr.running;
+      const btn = document.getElementById('btnScrape');
+      const icon = document.getElementById('btnScrapeIcon');
+      btn.disabled = scrapeRunning;
+      icon.textContent = scrapeRunning ? '⏳' : '🔄';
+
+      const lastEnd = fr.last_end_at || fr.updated_at;
+      document.getElementById('scrapeLast').textContent = formatDateFr(lastEnd) + (fr.last_start_at ? ' (début : ' + formatDateFr(fr.last_start_at) + ')' : '');
+      document.getElementById('scrapeModels').textContent = st.models_in_market_fr_csv != null ? String(st.models_in_market_fr_csv) : '—';
+      document.getElementById('scrapeMsg').textContent = fr.last_message || '—';
+      document.getElementById('scrapeNext').textContent = 'Planifié (scheduler) — voir logs serveur';
+
+      const errEl = document.getElementById('scrapeErr');
+      if (st.last_error_hint) {
+        errEl.style.display = 'block';
+        errEl.textContent = 'Dernière erreur : ' + st.last_error_hint;
+      } else {
+        errEl.style.display = 'none';
+        errEl.textContent = '';
+      }
+      return st;
+    } catch (e) {
+      document.getElementById('scrapeMsg').textContent = '—';
+      toast('Statut scraping : ' + e.message, 'err');
+    }
+  }
+
+  function getWorkingList() {
+    let list = viewMode === 'search' ? searchResults.slice() : allItems.slice();
+    if (viewMode === 'all' && brandFilter) {
+      list = list.filter(function (r) { return (r.brand || '').toLowerCase() === brandFilter.toLowerCase(); });
+    }
+    list.sort(function (a, b) {
+      if (sortKey === 'price-asc' || sortKey === 'price-desc') {
+        const pa = parseFloat(String(a.price_avg || 0).replace(',', '.')) || 0;
+        const pb = parseFloat(String(b.price_avg || 0).replace(',', '.')) || 0;
+        return sortKey === 'price-asc' ? pa - pb : pb - pa;
+      }
+      const na = ((a.brand || '') + ' ' + (a.model || '')).toLowerCase();
+      const nb = ((b.brand || '') + ' ' + (b.model || '')).toLowerCase();
+      return na.localeCompare(nb, 'fr');
+    });
+    return list;
+  }
+
+  function renderTable() {
+    const list = getWorkingList();
+    const total = list.length;
+    const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+    if (currentPage > pages) currentPage = pages;
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const pageRows = list.slice(start, start + PAGE_SIZE);
+
+    const tbody = document.getElementById('tableBody');
+    const empty = document.getElementById('emptyState');
+    tbody.innerHTML = '';
+
+    if (total === 0) {
+      empty.style.display = 'block';
+      if (viewMode === 'all' && !allItems.length) {
+        empty.textContent = 'Aucune donnée — lancez un premier scraping (bouton « Forcer scraping »).';
+      } else {
+        empty.textContent = 'Aucun résultat.';
+      }
+      document.getElementById('pageInfo').textContent = '';
+      document.getElementById('pageButtons').innerHTML = '';
+      return;
+    }
+    empty.style.display = 'none';
+
+    pageRows.forEach(function (row) {
+      const tr = document.createElement('tr');
+      tr.dataset.modelId = row.model_id;
+      tr.innerHTML =
+        '<td>' + escapeHtml(row.brand) + '</td>' +
+        '<td>' + escapeHtml(cleanModelName(row.brand, row.model)) + '</td>' +
+        '<td class="price">' + formatEuro(row.price_min) + '</td>' +
+        '<td class="price">' + formatEuro(row.price_avg) + '</td>' +
+        '<td class="price">' + formatEuro(row.price_max) + '</td>' +
+        '<td class="src-cell" data-mid="' + escapeAttr(encodeURIComponent(row.model_id)) + '"><span class="muted">…</span></td>' +
+        '<td>' + escapeHtml(row.updated_at || '—') + '</td>' +
+        '<td class="conf-cell">' + renderConfidence(row.confidence) + '</td>';
+      tr.addEventListener('click', function () { openModal(row.model_id); });
+      tbody.appendChild(tr);
+    });
+
+    document.getElementById('pageInfo').textContent =
+      total + ' modèle(s) — page ' + currentPage + ' / ' + pages;
+
+    const pb = document.getElementById('pageButtons');
+    pb.innerHTML = '';
+    let nums = [];
+    if (pages <= 9) {
+      for (let p = 1; p <= pages; p++) nums.push(p);
+    } else {
+      nums.push(1);
+      const s = Math.max(2, currentPage - 1);
+      const e = Math.min(pages - 1, currentPage + 1);
+      if (s > 2) nums.push('…');
+      for (let p = s; p <= e; p++) nums.push(p);
+      if (e < pages - 1) nums.push('…');
+      nums.push(pages);
+    }
+    nums.forEach(function (n) {
+      if (n === '…') {
+        const sp = document.createElement('span');
+        sp.textContent = '…';
+        sp.style.cssText = 'color:var(--muted);padding:0 0.25rem;';
+        pb.appendChild(sp);
+        return;
+      }
+      const p = n;
+      const b = document.createElement('button');
+      b.textContent = String(p);
+      if (p === currentPage) b.classList.add('active');
+      b.disabled = p === currentPage;
+      b.addEventListener('click', function () { currentPage = p; renderTable(); });
+      pb.appendChild(b);
+    });
+
+    loadSourceCountsForPage();
+  }
+
+  function escapeHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/'/g, '&#39;');
+  }
+
+  async function loadSourceCountsForPage() {
+    const cells = document.querySelectorAll('td.src-cell[data-mid]');
+    const jobs = Array.prototype.map.call(cells, function (td) {
+      const raw = td.getAttribute('data-mid');
+      if (!raw) return Promise.resolve();
+      let mid;
+      try { mid = decodeURIComponent(raw); } catch (e) { mid = raw; }
+      const enc = encodeURIComponent(mid);
+      return fetchJson('/api/sneakers/' + enc).then(function (d) {
+        td.textContent = d.sources_count != null ? String(d.sources_count) : '0';
+      }).catch(function () { td.textContent = '—'; });
+    });
+    await Promise.all(jobs);
+  }
+
+  function openHistoryModal(modelId) {
+    var overlay = document.getElementById('modal-history-overlay');
+    if (!overlay || !modelId) return;
+    overlay.style.display = 'flex';
+    document.getElementById('history-modal-title').textContent = String(modelId).replace(/\|/g, ' ');
+    document.getElementById('history-modal-body').innerHTML = '<p style="color:#666">Chargement...</p>';
+
+    var enc = encodeURIComponent(modelId);
+    Promise.all([
+      fetchJson('/api/sneakers/' + enc + '/history?days=30'),
+      fetchJson('/api/sneakers/' + enc + '/trend')
+    ]).then(function (pair) {
+      renderHistoryModal(pair[0], pair[1]);
+    }).catch(function () {
+      document.getElementById('history-modal-body').innerHTML =
+        '<p style="color:#ff4444">Historique non disponible</p>';
+    });
+  }
+
+  function closeHistoryModal() {
+    var overlay = document.getElementById('modal-history-overlay');
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function renderHistoryModal(hist, trend) {
+    trend = trend || {};
+    hist = hist || {};
+    var points = hist.history || [];
+    var trendIcons = { hausse: '📈', baisse: '📉', stable: '➡️' };
+    var trendColors = { hausse: '#ff6b6b', baisse: '#00ff88', stable: '#ffd700' };
+    var trKey = trend.trend;
+    var icon = trendIcons[trKey] || '—';
+    var color = trendColors[trKey] || '#aaa';
+    var chg = trend.change_pct != null ? Number(trend.change_pct) : 0;
+
+    var svgChart = '<p style="color:#666;font-size:13px">Pas assez de données pour le graphique (min. 2 snapshots)</p>';
+    if (points.length >= 2) {
+      var prices = points.map(function (p) { return Number(p.price_avg); });
+      var minP = Math.min.apply(null, prices);
+      var maxP = Math.max.apply(null, prices);
+      var range = (maxP - minP) || 1;
+      var W = 520;
+      var H = 80;
+      var pts = prices.map(function (p, i) {
+        var x = (i / (prices.length - 1)) * W;
+        var y = H - ((p - minP) / range) * (H - 10) - 5;
+        return x.toFixed(1) + ',' + y.toFixed(1);
+      }).join(' ');
+      var dates = points.map(function (p) {
+        return (p.recorded_at && String(p.recorded_at).substring(0, 10)) || '';
+      });
+      var circlesAndLabels = points.map(function (p, i) {
+        var x = (i / (prices.length - 1)) * W;
+        var y = H - ((prices[i] - minP) / range) * (H - 10) - 5;
+        var dshort = dates[i] ? dates[i].substring(5) : '';
+        return '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="#00ff88"/>' +
+          '<text x="' + x.toFixed(1) + '" y="' + (H + 15) + '" font-size="9" fill="#666" text-anchor="middle">' +
+          escapeHtml(dshort) + '</text>';
+      }).join('');
+      svgChart =
+        '<svg width="100%" viewBox="0 0 ' + W + ' ' + (H + 20) + '" style="margin:12px 0;overflow:visible" aria-hidden="true">' +
+        '<polyline points="' + pts + '" fill="none" stroke="#00ff88" stroke-width="2" stroke-linejoin="round"/>' +
+        circlesAndLabels +
+        '</svg>';
+    }
+
+    var trendDisp = escapeHtml(String(trKey != null ? trKey : '—'));
+    var min30v = trend.min_30d != null ? escapeHtml(String(trend.min_30d)) : '—';
+    var max30v = trend.max_30d != null ? escapeHtml(String(trend.max_30d)) : '—';
+    var nSnap = trend.nb_snapshots != null ? String(trend.nb_snapshots) : '0';
+
+    document.getElementById('history-modal-body').innerHTML =
+      '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:16px">' +
+      '<span>Tendance : <strong style="color:' + color + '">' + icon + ' ' + trendDisp + '</strong></span>' +
+      '<span>Variation : <strong style="color:' + color + '">' + (chg >= 0 ? '+' : '') + chg + '%</strong></span>' +
+      '<span>Min 30j : <strong style="color:#00ff88">' + min30v + '\u00a0€</strong></span>' +
+      '<span>Max 30j : <strong style="color:#00ff88">' + max30v + '\u00a0€</strong></span>' +
+      '<span>Snapshots : <strong>' + escapeHtml(nSnap) + '</strong></span>' +
+      '</div>' +
+      svgChart +
+      (points.length === 0
+        ? '<p style="color:#666;font-size:13px">Aucun historique disponible — les données s\'accumuleront au fil des scrapings horaires.</p>'
+        : '');
+  }
+
+  window.__openHistoryModal = openHistoryModal;
+  window.__closeHistoryModal = closeHistoryModal;
+
+  async function openModal(modelId) {
+    const enc = encodeURIComponent(modelId);
+    try {
+      const d = await fetchJson('/api/sneakers/' + enc);
+      const agg = d.aggregated || {};
+      const title = (d.brand || '') + ' — ' + (d.model || '');
+      document.getElementById('modalTitle').textContent = title;
+
+      let srcHtml = '<table class="sources-mini"><thead><tr><th>Site</th><th>Min</th><th>Moy.</th><th>Max</th><th>N</th></tr></thead><tbody>';
+      (d.sources || []).forEach(function (s) {
+        srcHtml += '<tr><td>' + escapeHtml(s.shop || '—') + '</td>' +
+          '<td class="price">' + formatEuro(s.price_min) + '</td>' +
+          '<td class="price">' + formatEuro(s.price_avg) + '</td>' +
+          '<td class="price">' + formatEuro(s.price_max) + '</td>' +
+          '<td>' + escapeHtml(String(s.price_count || '')) + '</td></tr>';
+      });
+      if (!(d.sources || []).length) {
+        srcHtml += '<tr><td colspan="5" style="color:var(--muted)">Aucune ligne source (CSV sources).</td></tr>';
+      }
+      srcHtml += '</tbody></table>';
+
+      document.getElementById('modalBody').innerHTML =
+        '<p style="margin:0 0 0.5rem;color:var(--muted);font-size:0.88rem;">Marché ' + escapeHtml(String(agg.market || 'FR')) + '</p>' +
+        '<div class="highlight-prices">' +
+        '<div class="hp"><div class="lbl">Min</div><div class="num">' + formatEuro(agg.price_min) + '</div></div>' +
+        '<div class="hp"><div class="lbl">Moyenne</div><div class="num">' + formatEuro(agg.price_avg) + '</div></div>' +
+        '<div class="hp"><div class="lbl">Max</div><div class="num">' + formatEuro(agg.price_max) + '</div></div>' +
+        '</div>' +
+        renderConfidenceDetail(d.confidence) +
+        '<button type="button" id="btn-open-history" class="modal-history-cta">📊 Voir historique des prix</button>' +
+        '<h4 style="margin:1rem 0 0.35rem;font-size:0.85rem;color:var(--accent);">Sources de prix</h4>' +
+        '<p style="margin:0 0 0.5rem;font-size:0.78rem;color:var(--muted);">Pas d’URL produit dans les données agrégées — colonne site uniquement.</p>' +
+        srcHtml;
+
+      document.getElementById('modalBackdrop').classList.add('open');
+      var btnHist = document.getElementById('btn-open-history');
+      if (btnHist) {
+        btnHist.addEventListener('click', function () { openHistoryModal(modelId); });
+      }
+    } catch (e) {
+      toast('Détail : ' + e.message, 'err');
+    }
+  }
+
+  function closeModal() {
+    document.getElementById('modalBackdrop').classList.remove('open');
+  }
+
+  async function loadSneakers() {
+    document.getElementById('tableLoader').classList.add('visible');
+    try {
+      var url = '/api/sneakers?limit=500&offset=0';
+      var data = await fetchJson(url);
+      console.log('API response:', data);
+      allItems = normalizeSneakerListPayload(data);
+      viewMode = 'all';
+      searchQuery = '';
+      document.getElementById('searchInput').value = '';
+      currentPage = 1;
+      renderTable();
+      if (!allItems.length) {
+        toast('Aucune ligne dans market_fr.csv — lancez un scraping.', 'err');
+      }
+    } catch (e) {
+      toast('Liste sneakers : ' + e.message, 'err');
+      allItems = [];
+      renderTable();
+    } finally {
+      document.getElementById('tableLoader').classList.remove('visible');
+    }
+  }
+
+  async function runSearch(q) {
+    if (!q || !q.trim()) {
+      viewMode = 'all';
+      currentPage = 1;
+      renderTable();
+      return;
+    }
+    document.getElementById('tableLoader').classList.add('visible');
+    try {
+      const data = await fetchJson('/api/sneakers/search?q=' + encodeURIComponent(q.trim()));
+      searchResults = data.results || [];
+      viewMode = 'search';
+      currentPage = 1;
+      renderTable();
+    } catch (e) {
+      toast('Recherche : ' + e.message, 'err');
+    } finally {
+      document.getElementById('tableLoader').classList.remove('visible');
+    }
+  }
+
+  document.getElementById('btnShowAll').addEventListener('click', function () {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('brandFilter').value = '';
+    brandFilter = '';
+    document.getElementById('sortSelect').value = 'name-asc';
+    sortKey = 'name-asc';
+    currentPage = 1;
+    loadSneakers();
+  });
+
+  document.getElementById('brandFilter').addEventListener('change', function () {
+    brandFilter = this.value;
+    currentPage = 1;
+    renderTable();
+  });
+
+  document.getElementById('sortSelect').addEventListener('change', function () {
+    sortKey = this.value;
+    currentPage = 1;
+    renderTable();
+  });
+
+  document.getElementById('searchInput').addEventListener('input', function () {
+    const v = this.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(function () {
+      runSearch(v);
+    }, SEARCH_DEBOUNCE_MS);
+  });
+
+  (function () {
+    var b = document.getElementById('btnGoogleVerify');
+    if (!b) return;
+    b.addEventListener('click', function () {
+      var msg = document.getElementById('googleVerifyMsg');
+      b.disabled = true;
+      if (msg) msg.textContent = 'Vérification en cours (Playwright, peut prendre plusieurs minutes)…';
+      fetchJsonLong('/api/google/verify?sample_size=5', { method: 'POST' }, GOOGLE_VERIFY_TIMEOUT_MS)
+        .then(function (r) {
+          if (msg) {
+            msg.textContent = 'Terminé : ' + (r.ok != null ? r.ok : '0') + ' OK, ' +
+              (r.suspect != null ? r.suspect : '0') + ' suspects, ' +
+              (r.invalid != null ? r.invalid : '0') + ' invalides.';
+          }
+          toast('Vérification Google terminée.', 'ok');
+          loadGoogleStats().catch(function () {});
+        })
+        .catch(function (e) {
+          if (msg) msg.textContent = '';
+          toast('Google Shopping : ' + e.message, 'err');
+        })
+        .finally(function () { b.disabled = false; });
+    });
+  })();
+
+  document.getElementById('btnScrape').addEventListener('click', function () {
+    if (!confirm('Lancer un scraping complet maintenant ? Cela peut prendre plusieurs minutes.')) return;
+    fetchJson('/api/scrape/trigger', { method: 'POST' })
+      .then(function () {
+        toast('Scraping lancé en arrière-plan.', 'ok');
+        scrapeRunning = true;
+        document.getElementById('btnScrape').disabled = true;
+        document.getElementById('btnScrapeIcon').textContent = '⏳';
+        setTimeout(loadScrapeStatus, 800);
+      })
+      .catch(function (e) { toast('Scraping : ' + e.message, 'err'); });
+  });
+
+  document.getElementById('modalClose').addEventListener('click', closeModal);
+  document.getElementById('modalBackdrop').addEventListener('click', function (e) {
+    if (e.target === this) closeModal();
+  });
+
+  (function () {
+    var b = document.getElementById('btnAlertsBadge');
+    if (b) b.addEventListener('click', openAlertsModal);
+    var c = document.getElementById('modalAlertsClose');
+    if (c) c.addEventListener('click', closeAlertsModal);
+    var o = document.getElementById('modal-alerts-overlay');
+    if (o) o.addEventListener('click', function (e) { if (e.target === o) closeAlertsModal(); });
+    var m = document.getElementById('btnAlertsMarkAll');
+    if (m) {
+      m.addEventListener('click', function () {
+        postJson('/api/alerts/mark-seen', {})
+          .then(function () {
+            toast('Alertes marquées comme vues.', 'ok');
+            closeAlertsModal();
+            loadAlertsCount();
+          })
+          .catch(function (e) { toast(e.message, 'err'); });
+      });
+    }
+  })();
+
+  (function () {
+    var ho = document.getElementById('modal-history-overlay');
+    if (!ho) return;
+    ho.addEventListener('click', function (e) {
+      if (e.target === ho) closeHistoryModal();
+    });
+  })();
+
+  async function loadGoogleStats() {
+    var fi = document.getElementById('googleFiab');
+    var okEl = document.getElementById('googleOk');
+    var susEl = document.getElementById('googleSus');
+    var invEl = document.getElementById('googleInv');
+    var totEl = document.getElementById('googleTot');
+    if (!fi || !okEl) return;
+    try {
+      var s = await fetchJson('/api/google/stats');
+      var pct = s.fiabilite_pct != null ? Number(s.fiabilite_pct) : null;
+      var tot = s.total != null ? Number(s.total) : 0;
+      fi.textContent = (pct != null && !isNaN(pct) ? String(pct) : '—') + '% ✅';
+      okEl.textContent = s.ok != null ? String(s.ok) : '—';
+      susEl.textContent = s.suspect != null ? String(s.suspect) : '—';
+      invEl.textContent = s.invalid != null ? String(s.invalid) : '—';
+      totEl.textContent = String(tot);
+    } catch (e) {
+      fi.textContent = '—';
+      okEl.textContent = '—';
+      susEl.textContent = '—';
+      invEl.textContent = '—';
+      totEl.textContent = '—';
+    }
+  }
+
+  async function init() {
+    document.getElementById('tableLoader').classList.add('visible');
+    try {
+      await loadStats();
+      await loadScrapeStatus();
+      await loadGoogleStats();
+      await loadSneakers();
+      loadAlertsCount();
+    } catch (e) {}
+    document.getElementById('tableLoader').classList.remove('visible');
+
+    statsTimer = setInterval(function () {
+      loadStats().catch(function () {});
+      loadScrapeStatus().catch(function () {});
+      loadGoogleStats().catch(function () {});
+      loadAlertsCount();
+    }, STATS_REFRESH_MS);
+
+    setInterval(function () { loadScrapeStatus().catch(function () {}); }, 30000);
+    setInterval(function () { loadAlertsCount(); }, 120000);
+  }
+
+  init();
+})();
+  </script>
+</body>
+</html>

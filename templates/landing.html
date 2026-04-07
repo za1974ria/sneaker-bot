@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0d0d0d">
+  <meta name="color-scheme" content="dark">
+  <title>PrixDesBaskets — Suivi des prix sneakers FR</title>
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --bg2: #121212;
+      --border: #1f1f1f;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      --accent: #00ff88;
+      --accent-dim: rgba(0, 255, 136, 0.12);
+      --radius: 14px;
+      --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      -webkit-text-size-adjust: 100%;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 28px); }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(18px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .reveal {
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.55s ease, transform 0.55s ease;
+    }
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    /* Nav */
+    .nav {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(13, 13, 13, 0.92);
+      backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 0; flex-wrap: wrap; gap: 12px;
+    }
+    .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.15rem; color: var(--text); }
+    .logo:hover { text-decoration: none; color: var(--accent); }
+    .nav-links { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+    .nav-links a { color: var(--muted); font-size: 0.9rem; font-weight: 600; }
+    .nav-links a:hover { color: var(--accent); text-decoration: none; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 12px 22px; border-radius: 10px; font-weight: 800; font-size: 0.92rem;
+      border: none; cursor: pointer; transition: transform 0.15s ease, filter 0.15s ease;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--accent); color: #052818; }
+    .btn-primary:hover { filter: brightness(1.08); text-decoration: none; }
+    .btn-ghost {
+      background: transparent; color: var(--accent);
+      border: 1px solid rgba(0, 255, 136, 0.45);
+    }
+    .btn-ghost:hover { background: var(--accent-dim); text-decoration: none; }
+    .btn-lg { padding: 16px 32px; font-size: 1rem; border-radius: 12px; }
+    /* Hero */
+    .hero {
+      padding: clamp(36px, 8vw, 72px) 0 clamp(40px, 7vw, 64px);
+      text-align: center;
+      animation: fadeUp 0.7s ease both;
+    }
+    .hero-badge {
+      display: inline-block; margin-bottom: 18px;
+      padding: 6px 14px; border-radius: 999px;
+      background: var(--accent-dim); color: var(--accent);
+      font-size: 0.82rem; font-weight: 700; letter-spacing: 0.02em;
+    }
+    .hero h1 {
+      margin: 0 0 16px;
+      font-size: clamp(1.75rem, 5vw, 2.55rem);
+      font-weight: 800; letter-spacing: -0.03em; line-height: 1.15;
+    }
+    .hero .lead {
+      margin: 0 auto 28px; max-width: 560px;
+      color: var(--muted); font-size: clamp(1rem, 2.4vw, 1.12rem);
+    }
+    .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 20px; }
+    .hero-note { font-size: 0.84rem; color: var(--muted); }
+    /* Stats */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 14px; margin-top: 8px;
+    }
+    .stat-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 18px 16px; text-align: center;
+    }
+    .stat-card strong {
+      display: block; font-size: clamp(1.35rem, 4vw, 1.65rem);
+      color: var(--accent); font-weight: 800; margin-bottom: 4px;
+    }
+    .stat-card span { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    /* Sections */
+    section { padding: clamp(48px, 7vw, 72px) 0; border-top: 1px solid var(--border); }
+    section h2 {
+      margin: 0 0 10px; font-size: clamp(1.35rem, 3.5vw, 1.75rem);
+      font-weight: 800; text-align: center;
+    }
+    .section-intro {
+      text-align: center; color: var(--muted); max-width: 520px;
+      margin: 0 auto 36px; font-size: 0.98rem;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px 20px;
+      transition: border-color 0.2s ease;
+    }
+    .card:hover { border-color: rgba(0, 255, 136, 0.25); }
+    .card .icon { font-size: 1.6rem; margin-bottom: 10px; }
+    .card h3 { margin: 0 0 10px; font-size: 1.05rem; font-weight: 700; }
+    .card p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
+    /* Pricing */
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px; align-items: stretch;
+    }
+    .price-card {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 26px 22px;
+      display: flex; flex-direction: column; position: relative;
+    }
+    .price-card.featured {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.2);
+    }
+    .price-badge {
+      position: absolute; top: -10px; right: 16px;
+      background: var(--accent); color: #052818;
+      font-size: 0.68rem; font-weight: 800; padding: 4px 10px; border-radius: 6px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .price-card h3 { margin: 0 0 6px; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .price-card .amount { font-size: 1.85rem; font-weight: 800; color: var(--text); margin-bottom: 16px; }
+    .price-card ul { margin: 0 0 22px; padding: 0 0 0 1.1rem; color: var(--muted); font-size: 0.9rem; flex: 1; }
+    .price-card li { margin-bottom: 8px; }
+    .price-card .btn { width: 100%; }
+    /* Testimonials */
+    .quote {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px;
+      font-style: italic; color: #d4d4d8; font-size: 0.95rem;
+    }
+    .quote footer { margin-top: 14px; font-style: normal; font-size: 0.82rem; color: var(--muted); }
+    /* FAQ */
+    details {
+      background: var(--bg2); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px 18px; margin-bottom: 10px;
+    }
+    details summary { cursor: pointer; font-weight: 700; color: var(--text); }
+    details[open] summary { margin-bottom: 10px; color: var(--accent); }
+    details p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+    /* CTA */
+    .cta-final {
+      text-align: center; padding: clamp(48px, 8vw, 80px) 24px;
+      background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
+      border-radius: var(--radius); border: 1px solid var(--border);
+      margin-bottom: 24px;
+    }
+    .cta-final h2 { margin-bottom: 12px; }
+    .cta-final .sub { color: var(--muted); margin-bottom: 22px; font-size: 0.95rem; }
+    footer {
+      padding: 28px 0 40px; border-top: 1px solid var(--border);
+      text-align: center; color: var(--muted); font-size: 0.85rem;
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div class="wrap nav-inner">
+      <a class="logo" href="/">👟 PrixDesBaskets</a>
+      <nav class="nav-links">
+        <a href="#fonctionnalites">Fonctionnalités</a>
+        <a href="#tarifs">Tarifs</a>
+        <a href="#faq">FAQ</a>
+        <a href="/login">Connexion</a>
+        <a class="btn btn-primary" href="/subscribe" style="padding:8px 16px;font-size:0.85rem">Essayer</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <span class="hero-badge">⭐ 88/100 fiabilité IA</span>
+        <h1>Suivez les prix sneakers en temps réel</h1>
+        <p class="lead" id="hero-sub">
+          <span id="hero-stats-line">148 modèles • 17 sources • Mis à jour toutes les 5h</span>
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="/subscribe">Essayer gratuitement</a>
+          <a class="btn btn-ghost" href="/comparison">Voir la démo</a>
+        </div>
+        <p class="hero-note">Données marché France — agrégation multi-boutiques</p>
+      </div>
+    </section>
+
+    <section id="stats" class="wrap reveal">
+      <h2>Stats en direct</h2>
+      <p class="section-intro">Chiffres issus de notre base <strong>market FR</strong>, mis à jour automatiquement.</p>
+      <div class="stats">
+        <div class="stat-card"><strong id="st-models">—</strong><span>Modèles suivis</span></div>
+        <div class="stat-card"><strong id="st-sources">—</strong><span>Sources actives</span></div>
+        <div class="stat-card"><strong id="st-avg">—</strong><span>Prix moyen</span></div>
+        <div class="stat-card"><strong id="st-maj" style="font-size:1rem">—</strong><span>Dernière MAJ</span></div>
+      </div>
+    </section>
+
+    <section id="fonctionnalites">
+      <div class="wrap">
+        <h2 class="reveal">Fonctionnalités</h2>
+        <p class="section-intro reveal">Tout ce dont vous avez besoin pour piloter vos prix sneakers sur le marché français.</p>
+        <div class="grid-3">
+          <article class="card reveal"><div class="icon">🔍</div><h3>Scraping multi-sources</h3><p>17 sites français analysés automatiquement pour chaque modèle.</p></article>
+          <article class="card reveal"><div class="icon">🤖</div><h3>Validation IA Groq</h3><p>Les prix aberrants sont détectés et filtrés avant publication.</p></article>
+          <article class="card reveal"><div class="icon">📊</div><h3>Historique 30 jours</h3><p>Suivez les tendances hausse, baisse ou stabilité sur un mois.</p></article>
+          <article class="card reveal"><div class="icon">🔔</div><h3>Alertes prix</h3><p>Soyez notifié lorsqu’un prix baisse significativement (ex. 10&nbsp;%).</p></article>
+          <article class="card reveal"><div class="icon">📥</div><h3>Export WooCommerce</h3><p>CSV prêt à importer en un clic dans votre boutique.</p></article>
+          <article class="card reveal"><div class="icon">⭐</div><h3>Score de crédibilité</h3><p>Chaque agrégat est noté sur 100 pour qualifier la fiabilité.</p></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="tarifs">
+      <div class="wrap">
+        <h2 class="reveal">Tarifs</h2>
+        <p class="section-intro reveal">Choisissez l’offre adaptée à votre activité. Sans engagement sur l’essai.</p>
+        <div class="pricing-grid">
+          <div class="price-card reveal">
+            <h3>Essai gratuit</h3>
+            <div class="amount">0€</div>
+            <ul>
+              <li>5 essais offerts</li>
+              <li>Puis 1&nbsp;€ pour 2 essais supplémentaires</li>
+              <li>Accès complet au tableau de bord</li>
+              <li>Découverte du comparateur FR</li>
+            </ul>
+            <a class="btn btn-ghost" href="/subscribe">Commencer</a>
+          </div>
+          <div class="price-card reveal">
+            <h3>Mensuel</h3>
+            <div class="amount">29€<small style="font-size:0.55em;font-weight:600;color:var(--muted)">/mois</small></div>
+            <ul>
+              <li>148 modèles suivis</li>
+              <li>Mises à jour toutes les 5&nbsp;h</li>
+              <li>Export WooCommerce</li>
+              <li>Alertes prix</li>
+              <li>10 jours offerts au 1<sup>er</sup> abonnement</li>
+            </ul>
+            <a class="btn btn-primary" href="/subscribe">S’abonner</a>
+          </div>
+          <div class="price-card featured reveal">
+            <span class="price-badge">Meilleure offre</span>
+            <h3>Annuel</h3>
+            <div class="amount">190€<small style="font-size:0.55em;font-weight:600;color:var(--muted)">/an</small></div>
+            <ul>
+              <li>Tout le mensuel</li>
+              <li>Économisez l’équivalent de 158€/an vs mensuel</li>
+              <li>Priorité sur les nouveautés catalogue</li>
+            </ul>
+            <a class="btn btn-primary" href="/subscribe">S’abonner</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="temoignages">
+      <div class="wrap">
+        <h2 class="reveal">Ils nous font confiance</h2>
+        <p class="section-intro reveal">Retours de professionnels du retail et de l’e-commerce.</p>
+        <div class="grid-3">
+          <blockquote class="quote reveal">«&nbsp;Gain de temps énorme pour ma boutique.&nbsp;»<footer>— Thomas L., gérant boutique, Paris</footer></blockquote>
+          <blockquote class="quote reveal">«&nbsp;Les alertes prix m’ont évité des pertes sur des lignes surstockées.&nbsp;»<footer>— Sarah M., e-commerce, Lyon</footer></blockquote>
+          <blockquote class="quote reveal">«&nbsp;Export WooCommerce parfait, facile à utiliser au quotidien.&nbsp;»<footer>— Karim B., dropshipper, Marseille</footer></blockquote>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="wrap" style="max-width:720px">
+        <h2 class="reveal">FAQ</h2>
+        <p class="section-intro reveal">Réponses rapides aux questions les plus fréquentes.</p>
+        <div class="reveal">
+          <details><summary>Comment fonctionne l’essai gratuit&nbsp;?</summary><p>5 comparaisons gratuites, sans carte bancaire. Une fois ce quota consommé, chaque tranche de 2 essais coûte 1&nbsp;€ (crédit enregistré sur votre compte par l’administrateur).</p></details>
+          <details><summary>Les prix sont-ils fiables&nbsp;?</summary><p>Indice de fiabilité affiché jusqu’à 88/100 — validation IA Groq sur 17 sources françaises, avec filtrage des anomalies.</p></details>
+          <details><summary>Compatible WooCommerce / PrestaShop&nbsp;?</summary><p>Oui — export CSV en un clic (WooCommerce et PrestaShop supportés côté fichiers standards).</p></details>
+          <details><summary>Puis-je annuler à tout moment&nbsp;?</summary><p>Oui — sans engagement sur l’offre mensuelle, résiliation à tout moment depuis votre espace.</p></details>
+          <details><summary>Combien de modèles sont suivis&nbsp;?</summary><p>148 modèles couvrant 10 marques majeures sur le marché français.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap">
+      <div class="cta-final reveal">
+        <h2>Prêt à optimiser vos prix&nbsp;?</h2>
+        <p class="sub">5 essais gratuits • Sans carte bancaire</p>
+        <a class="btn btn-primary btn-lg" href="/subscribe">Commencer gratuitement</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>© 2026 PrixDesBaskets</p>
+      <p>Site : <a href="https://sneakerbot.shop">sneakerbot.shop</a></p>
+      <p><a href="/mentions-legales">Mentions légales</a> · <a href="/login">Connexion</a></p>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      var nodes = document.querySelectorAll('.reveal');
+      if (!('IntersectionObserver' in window)) {
+        nodes.forEach(function (n) { n.classList.add('visible'); });
+      } else {
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              e.target.classList.add('visible');
+              io.unobserve(e.target);
+            }
+          });
+        }, { rootMargin: '0px 0px -40px 0px', threshold: 0.08 });
+        nodes.forEach(function (n) { io.observe(n); });
+      }
+
+      function setText(id, txt) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = txt;
+      }
+
+      fetch('/api/public/landing-stats', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+        .then(function (d) {
+          var mc = d.models_count != null ? d.models_count : 148;
+          var sc = d.sources_count != null ? d.sources_count : 17;
+          var avg = d.avg_price_eur != null ? d.avg_price_eur : 117;
+          var maj = d.last_updated || '—';
+          setText('st-models', String(mc));
+          setText('st-sources', String(sc));
+          setText('st-avg', Math.round(avg) + '\u00a0€');
+          setText('st-maj', maj || '—');
+          var line = mc + ' modèles • ' + sc + ' sources • Mis à jour toutes les 5h';
+          setText('hero-stats-line', line);
+        })
+        .catch(function () {
+          setText('st-models', '148');
+          setText('st-sources', '17');
+          setText('st-avg', '117€');
+          setText('st-maj', '—');
+        });
+    })();
+  </script>
+</body>
+</html>

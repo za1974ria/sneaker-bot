@@ -1,0 +1,5 @@
+produit,min,max,avg,prev_avg,variation,trend,updated_at
+Nike Air Max,85.0,190.0,135.0,135.0,0.0,STABLE,2026-03-23 20:00
+Nike Pegasus,100.0,210.0,137.5,137.5,0.0,STABLE,2026-03-23 20:01
+Adidas Samba,55.0,120.0,70.0,70.0,0.0,STABLE,2026-03-23 20:01
+Nike Air Force 1,60.0,130.0,105.0,105.0,0.0,STABLE,2026-03-23 20:02

@@ -1,0 +1,101 @@
+brand,model,price_min,price_max,price_avg,status,reasons
+Adidas,Campus 00s,65.0,130.0,93.75,SUSPECT,triple_duplique_marque
+Adidas,Campus 80s,65.0,130.0,93.75,SUSPECT,triple_duplique_marque
+Adidas,Forum High,74.99,120.0,100.83,SUSPECT,triple_duplique_marque
+Adidas,Forum Low,74.99,120.0,100.83,SUSPECT,triple_duplique_marque
+Adidas,Gazelle Bold,50.0,130.0,90.38,OK,
+Adidas,Gazelle Indoor,50.0,120.0,85.0,OK,
+Adidas,Samba Classic,70.0,135.0,105.38,OK,
+Adidas,Samba OG,70.0,130.0,102.91,OK,
+Adidas,Stan Smith,55.0,140.0,94.54,SUSPECT,triple_duplique_marque
+Adidas,Stan Smith Recon,55.0,140.0,94.54,SUSPECT,triple_duplique_marque
+Adidas,Superstar,65.0,150.0,100.0,OK,
+Adidas,Superstar XLG,45.0,119.99,78.0,OK,
+Asics,Gel-1130,65.0,149.99,91.87,OK,
+Asics,Gel-1130 Premium,65.0,149.99,95.0,OK,
+Asics,Gel-Cumulus 26,84.99,160.0,124.28,OK,
+Asics,Gel-Kayano 14,84.99,180.0,132.5,OK,
+Asics,Gel-Kayano 14 Vintage,84.99,180.0,124.16,OK,
+Asics,Gel-Lyte III OG,75.0,149.99,103.33,OK,
+Asics,Gel-Nimbus 9,84.99,180.0,125.0,OK,
+Asics,GT-2160,84.99,149.99,115.0,OK,
+Asics,GT-2160 Premium,84.99,149.99,112.49,OK,
+Converse,All Star Hi,40.0,109.99,69.54,OK,
+Converse,All Star Low,40.0,109.99,70.38,OK,
+Converse,Chuck 70 Hi,50.0,100.0,73.33,OK,
+Converse,Chuck 70 Low,100.0,100.0,100.0,SUSPECT,min_eq_max
+Converse,Chuck 70 Plus,65.0,65.0,65.0,SUSPECT,min_eq_max
+Converse,One Star Pro,50.0,100.0,75.0,OK,
+Converse,Pro Leather Low,50.0,50.0,50.0,SUSPECT,min_eq_max
+Converse,Run Star Hike Hi,49.99,139.99,74.99,OK,
+Converse,Run Star Hike Low,49.99,109.99,66.87,OK,
+New Balance,1906R Metallic,55.0,200.0,113.08,SUSPECT,triple_duplique_marque
+New Balance,1906R Protection Pack,55.0,200.0,113.08,SUSPECT,triple_duplique_marque
+New Balance,2002R Gore-Tex,59.99,155.0,107.0,SUSPECT,triple_duplique_marque
+New Balance,2002R Protection Pack,59.99,155.0,107.0,SUSPECT,triple_duplique_marque
+New Balance,530 Silver,59.99,140.0,94.0,SUSPECT,triple_duplique_marque
+New Balance,530 White,59.99,140.0,94.0,SUSPECT,triple_duplique_marque
+New Balance,550 White Green,59.99,70.0,65.0,SUSPECT,triple_duplique_marque
+New Balance,550 White Navy,59.99,70.0,65.0,SUSPECT,triple_duplique_marque
+New Balance,574 Core,59.99,130.0,92.5,SUSPECT,triple_duplique_marque
+New Balance,574 Legacy,59.99,130.0,92.5,SUSPECT,triple_duplique_marque
+New Balance,990v6 Made in USA,59.99,170.0,130.0,OK,
+Nike,Air Force 1 High,58.0,189.99,103.11,SUSPECT,triple_duplique_marque
+Nike,Air Force 1 Low,58.0,189.99,103.11,SUSPECT,triple_duplique_marque
+Nike,Air Force 1 Mid,58.0,149.99,90.57,OK,
+Nike,Air Jordan 1 High OG,58.0,189.99,102.0,OK,
+Nike,Air Jordan 1 Low,58.0,189.99,103.11,SUSPECT,triple_duplique_marque
+Nike,Air Jordan 1 Mid,58.0,189.99,97.92,OK,
+Nike,Air Max 90 Essential,58.0,189.99,104.0,OK,
+Nike,Air Max 90 Gore-Tex,58.0,189.99,105.15,OK,
+Nike,Air Max 90 Premium,58.0,189.99,99.46,OK,
+Nike,Air Max 95 Essential,58.0,190.0,122.76,SUSPECT,triple_duplique_marque
+Nike,Air Max 95 Premium,58.0,189.99,98.93,SUSPECT,triple_duplique_marque
+Nike,Air Max 97 Essential,58.0,190.0,122.76,SUSPECT,triple_duplique_marque
+Nike,Air Max 97 Premium,58.0,189.99,98.93,SUSPECT,triple_duplique_marque
+Nike,Dunk High Retro,58.0,189.99,107.3,OK,
+Nike,Dunk Low Pro,58.0,189.99,99.56,SUSPECT,triple_duplique_marque
+Nike,Dunk Low Retro,58.0,189.99,99.56,SUSPECT,triple_duplique_marque
+On Running,Cloud 5 Push,110.0,169.99,140.0,SUSPECT,triple_duplique_marque
+On Running,Cloud 5 Waterproof,110.0,169.99,140.0,SUSPECT,triple_duplique_marque
+On Running,Cloud X 4,110.0,169.99,140.0,SUSPECT,triple_duplique_marque
+On Running,Cloudgo 2,125.0,180.0,145.0,SUSPECT,triple_duplique_marque
+On Running,Cloudmonster Hyper,125.0,180.0,145.0,SUSPECT,triple_duplique_marque
+On Running,Cloudnova Form,140.0,140.0,140.0,SUSPECT,min_eq_max
+On Running,Cloudrunner 2,110.0,160.0,135.0,OK,
+On Running,Cloudsurfer 7,110.0,180.0,148.33,OK,
+Puma,Clyde OG,40.0,110.0,62.5,OK,
+Puma,Future Rider Play On,50.0,65.0,57.5,OK,
+Puma,Palermo Leather,40.0,50.0,45.0,OK,
+Puma,Palermo OG,40.0,80.0,56.67,OK,
+Puma,RS-X Efekt,70.0,75.0,72.5,SUSPECT,triple_duplique_marque
+Puma,RS-X Reinvention,70.0,75.0,72.5,SUSPECT,triple_duplique_marque
+Puma,Speedcat,40.0,130.0,77.86,OK,
+Puma,Speedcat OG,40.0,110.0,65.0,OK,
+Puma,Suede Classic Archive,45.0,80.0,57.5,SUSPECT,triple_duplique_marque
+Puma,Suede Classic XXI,45.0,80.0,57.5,SUSPECT,triple_duplique_marque
+Reebok,BB 4000 II,75.0,150.0,108.0,OK,
+Reebok,Classic Leather Legacy,65.0,130.0,92.0,OK,
+Reebok,Classic Leather SP,70.0,135.0,95.0,OK,
+Reebok,Club C 85 Extra,58.0,115.0,82.0,OK,
+Reebok,Club C 85 Vintage,55.0,110.0,78.0,OK,
+Reebok,Freestyle Hi 1987,70.0,140.0,102.0,OK,
+Reebok,Instapump Fury OG,120.0,200.0,155.0,OK,
+Reebok,Nano X4,95.0,165.0,125.0,OK,
+Salomon,ACS Pro Advanced,140.0,210.0,170.0,OK,
+Salomon,Pulsar Advanced,130.0,200.0,160.0,OK,
+Salomon,Pulsar Platform,120.0,180.0,150.0,OK,
+Salomon,Speedcross 6,100.0,170.0,130.0,OK,
+Salomon,Speedcross 6 GTX,110.0,180.0,140.0,OK,
+Salomon,XT-4 Advanced,130.0,210.0,165.0,OK,
+Salomon,XT-4 OG,140.0,220.0,175.0,OK,
+Salomon,XT-6 Advanced,179.99,200.0,186.66,OK,
+Salomon,XT-6 Gore-Tex,179.99,200.0,190.0,OK,
+Vans,Authentic Lo Pro,45.0,120.0,82.0,OK,
+Vans,Era Stacked,60.0,60.0,60.0,SUSPECT,"min_eq_max,triple_duplique_marque"
+Vans,Half Cab Pro,60.0,60.0,60.0,SUSPECT,"min_eq_max,triple_duplique_marque"
+Vans,Old Skool Overt,49.0,100.0,72.9,SUSPECT,triple_duplique_marque
+Vans,Old Skool Stackform,49.0,100.0,72.9,SUSPECT,triple_duplique_marque
+Vans,Sk8-Hi Reissue,45.0,45.0,45.0,SUSPECT,"min_eq_max,triple_duplique_marque"
+Vans,Sk8-Hi Tapered,45.0,45.0,45.0,SUSPECT,"min_eq_max,triple_duplique_marque"
+Vans,Slip-On Platform,60.0,110.0,87.0,OK,

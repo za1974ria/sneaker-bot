@@ -1,0 +1,47 @@
+{
+  "tier1": [
+    {"name": "courir.com", "url": "https://www.courir.com", "active": true, "tier": 1, "method": "requests", "scraper": "FranceScraper"},
+    {"name": "footlocker.fr", "url": "https://www.footlocker.fr", "active": true, "tier": 1, "method": "requests", "scraper": "FranceScraper"},
+    {"name": "snipes.com/fr", "url": "https://www.snipes.com/fr", "active": true, "tier": 1, "method": "requests", "scraper": "FranceScraper"},
+    {"name": "snipes.com/fr-fr", "url": "https://www.snipes.com/fr-fr", "active": false, "tier": 1, "method": "requests", "scraper": "SnipesFrFrScraper"},
+    {"name": "sportsdirect.com", "url": "https://www.sportsdirect.com", "active": true, "tier": 1, "method": "requests", "scraper": "FranceScraper"},
+    {"name": "spartoo.com", "url": "https://www.spartoo.com", "active": true, "tier": 1, "method": "requests", "scraper": "SpartooScraper"},
+    {"name": "zalando.fr", "url": "https://www.zalando.fr", "active": true, "tier": 1, "method": "requests", "scraper": "ZalandoScraper", "notes": "Réactivé 2026-04-07 — proxy IPRoyal geo.iproyal.com:12321 injecté"},
+    {"name": "basket4ballers.com", "url": "https://www.basket4ballers.com", "active": false, "tier": 1, "method": "requests", "scraper": "Basket4BallersScraper"},
+    {"name": "intersport.fr", "url": "https://www.intersport.fr", "active": true, "tier": 1, "method": "requests", "scraper": "IntersportScraper"},
+    {"name": "jdsports.fr", "url": "https://www.jdsports.fr", "active": false, "tier": 1, "method": "requests", "scraper": "JdSportsScraper"},
+    {"name": "chausport.com", "url": "https://www.chausport.com", "active": false, "tier": 1, "method": "requests", "scraper": "ChausportScraper"},
+    {"name": "sarenza.com", "url": "https://www.sarenza.com", "active": false, "tier": 1, "method": "requests", "scraper": "SarenzaScraper"},
+    {"name": "go-sport.com", "url": "https://www.go-sport.com", "active": false, "tier": 1, "method": "requests", "scraper": "GoSportScraper"},
+    {"name": "sport2000.fr", "url": "https://www.sport2000.fr", "active": false, "tier": 1, "method": "requests", "scraper": "Sport2000Scraper", "notes": "Tier1 requests inactif — utiliser hypermarches Playwright"},
+    {"name": "decathlon.fr", "url": "https://www.decathlon.fr", "active": false, "tier": 1, "method": "requests", "scraper": "DecathlonScraper"},
+    {"name": "kickz.com/fr", "url": "https://www.kickz.com/fr", "active": false, "tier": 1, "method": "requests", "scraper": "KickzFrScraper"},
+    {"name": "footshop.fr", "url": "https://www.footshop.fr", "active": false, "tier": 1, "method": "requests", "scraper": "FootshopScraper"}
+  ],
+  "hypermarches": [
+    {"name": "decathlon.fr", "url": "https://www.decathlon.fr", "test_url": "https://www.decathlon.fr/search?Ntt=nike+air+force+1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "sport_grande_surface", "scraper": "DecathlonGrandeSurfaceScraper", "notes": "Classe dispo ; probe souvent 403 — hors pipeline"},
+    {"name": "intersport.fr", "url": "https://www.intersport.fr", "test_url": "https://www.intersport.fr/recherche/?q=nike+air+force+1", "active": true, "tier": 1, "method": "requests", "category": "hypermarche", "subcategory": "sport_grande_surface", "scraper": "IntersportScraper", "notes": "Prix via tier1 /sn-IS/ (pas la classe hypermarches)"},
+    {"name": "go-sport.com", "url": "https://www.go-sport.com", "test_url": "https://www.go-sport.com/search?q=nike+air+force+1", "active": false, "tier": 1, "method": "requests", "category": "hypermarche", "subcategory": "sport_grande_surface", "scraper": "GoSportGrandeSurfaceScraper", "notes": "Classe dispo ; probe 402 / redirect — hors pipeline"},
+    {"name": "sport2000.fr", "url": "https://www.sport2000.fr", "test_url": "https://www.sport2000.fr/recherche?q=nike+air+force+1", "active": false, "tier": 1, "method": "playwright", "category": "hypermarche", "subcategory": "sport_grande_surface", "scraper": "Sport2000GrandeSurfaceScraper", "notes": "Désactivé 2026-04-07 — Playwright timeout 100%, même symptôme que Zalando"},
+    {"name": "auchan.fr", "url": "https://www.auchan.fr", "test_url": "https://www.auchan.fr/recherche?q=nike+air+force+1&page=1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "hypermarche", "scraper": "AuchanFrScraper", "notes": "Classe dispo ; activer REGISTERED si test Nike AF1 ≥ 1 prix"},
+    {"name": "carrefour.fr", "url": "https://www.carrefour.fr", "test_url": "https://www.carrefour.fr/s?q=nike+air+force+1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "hypermarche", "scraper": "CarrefourFrScraper", "notes": "Probe souvent 403 — hors pipeline"},
+    {"name": "e.leclerc", "url": "https://www.e.leclerc", "test_url": "https://www.e.leclerc/cat?t=nike+air+force+1&page=1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "hypermarche", "scraper": "LeclercFrScraper", "notes": "Classe dispo — hors pipeline"},
+    {"name": "magasins-u.com", "url": "https://www.magasins-u.com", "test_url": "https://www.magasins-u.com/recherche?q=nike+air+force+1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "hypermarche", "scraper": "MagasinsUFrScraper", "notes": "Probe souvent 403 — hors pipeline"},
+    {"name": "casino.fr", "url": "https://www.casino.fr", "test_url": "https://www.casino.fr/recherche?q=nike+air+force+1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "hypermarche", "scraper": "CasinoFrScraper", "notes": "Classe dispo — hors pipeline"},
+    {"name": "monoprix.fr", "url": "https://www.monoprix.fr", "test_url": "https://www.monoprix.fr/recherche?q=nike+air+force+1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "hypermarche", "scraper": "MonoprixFrScraper", "notes": "Probe souvent 403 — hors pipeline"},
+    {"name": "cora.fr", "url": "https://www.cora.fr", "test_url": "https://www.cora.fr/search?q=nike+air+force+1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "hypermarche", "scraper": "CoraFrScraper", "notes": "Classe dispo — hors pipeline"},
+    {"name": "intermarche.com", "url": "https://www.intermarche.com", "test_url": "https://www.intermarche.com/courses/recherche?q=nike+air+force+1", "active": false, "tier": 1, "method": "requests_then_playwright", "category": "hypermarche", "subcategory": "hypermarche", "scraper": "IntermarcheFrScraper", "notes": "Classe dispo — hors pipeline"}
+  ],
+  "tier2": [
+    {"name": "wethenew.com", "url": "https://wethenew.com", "active": false, "tier": 2, "method": "requests_then_playwright", "scraper": "WeThenewScraper", "notes": "Désactivé temporairement: instable en prod"},
+    {"name": "nike.com/fr", "url": "https://www.nike.com/fr", "active": false, "tier": 2, "method": "requests_then_playwright", "scraper": "NikeFrScraper", "notes": "Désactivé temporairement: dépendance Playwright"},
+    {"name": "adidas.fr", "url": "https://www.adidas.fr", "active": true, "tier": 2, "method": "api_json", "scraper": "AdidasFrScraper", "notes": "content-engine PLP — marque Adidas uniquement"},
+    {"name": "klekt.com", "url": "https://www.klekt.com", "active": false, "tier": 2, "method": "playwright", "scraper": "KlektScraper", "notes": "Désactivé temporairement: source Playwright instable"},
+    {"name": "newbalance.fr", "url": "https://www.newbalance.fr", "active": false, "tier": 2, "method": "requests_then_playwright", "scraper": "NewBalanceFrScraper", "notes": "Probe/WAF 403 — scraper sans crash"},
+    {"name": "asics.com/fr", "url": "https://www.asics.com/fr", "active": false, "tier": 2, "method": "requests_then_playwright", "scraper": "AsicsFrScraper", "notes": "Probe 403 / shell court — scraper sans crash"},
+    {"name": "puma.com/fr", "url": "https://www.puma.com/fr", "active": false, "tier": 2, "method": "playwright", "scraper": "PumaFrScraper", "notes": "Désactivé temporairement: source Playwright instable"}
+  ],
+  "tier3": [
+    {"name": "stockx.com", "url": "https://stockx.com/fr-fr", "active": false, "tier": 3, "method": "playwright"}
+  ]
+}

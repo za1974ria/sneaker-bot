@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="color-scheme" content="dark">
+  <title>Abonnements — Admin</title>
+  <style>
+    :root { --bg:#0d0d0d; --card:#121212; --border:#2a2a2a; --text:#f4f4f5; --muted:#a1a1aa; --ok:#00ff88; --bad:#f87171; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 20px 16px 40px; }
+    .wrap { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 1.25rem; margin: 0 0 6px; }
+    h2 { font-size: 1rem; margin: 28px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .sub { color: var(--muted); font-size: .88rem; margin: 0 0 18px; }
+    table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 8px; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: .86rem; vertical-align: top; }
+    th { color: var(--muted); text-transform: uppercase; font-size: .72rem; letter-spacing: .04em; }
+    tr:last-child td { border-bottom: 0; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .btn { display: inline-block; padding: 8px 12px; border-radius: 8px; font-weight: 800; font-size: .78rem; text-decoration: none; border: none; cursor: pointer; }
+    .btn-ok { background: var(--ok); color: #052818; }
+    .btn-bad { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+    .empty { color: var(--muted); padding: 24px; text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
+    .nav { margin-bottom: 20px; }
+    .nav a { color: var(--ok); font-size: .88rem; }
+    code { font-size: .8rem; background: #1a1a1a; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="nav"><a href="/comparison">← Comparateur</a></div>
+    <h1>Demandes d’abonnement</h1>
+    <p class="sub">Réservé aux comptes administrateur. Vérifiez le virement avant validation.</p>
+
+    <h2>En attente</h2>
+    {% if pending %}
+    <table>
+      <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Canal</th><th>Plan</th><th>Réf.</th><th>Soumis</th><th></th></tr></thead>
+      <tbody>
+        {% for s in pending %}
+        {% set c = (s.get('canal') or 'email')|string|lower %}
+        <tr>
+          <td><code>{{ s.get('id', '') }}</code></td>
+          <td>{{ s.get('name', '') }}</td>
+          <td>{{ s.get('email', '') }}</td>
+          <td>
+            <span style="color:#00ff88;font-size:11px">
+              {% if c == 'email' %}📧{% elif c == 'whatsapp' %}📱{% else %}📧📱{% endif %}
+              {{ c|upper }}
+            </span>
+          </td>
+          <td>{{ s.get('plan', '') }}</td>
+          <td>{{ s.get('reference', '') }}</td>
+          <td>{{ s.get('submitted_at', '') }}</td>
+          <td class="actions">
+            <a class="btn btn-ok" href="/admin/validate/{{ s.get('id', '') }}">Valider</a>
+            <a class="btn btn-bad" href="/admin/reject/{{ s.get('id', '') }}">Refuser</a>
+            <a href="{{ s.get('wa_me_url', '#') }}"
+               target="_blank" rel="noopener noreferrer"
+               style="background:#25D366;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-block">
+              📱 WhatsApp
+            </a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Aucune demande en attente.</p>
+    {% endif %}
+
+    <h2>Validés</h2>
+    {% if validated %}
+    <table>
+      <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Plan</th><th>Login</th><th>Validé</th><th></th></tr></thead>
+      <tbody>
+        {% for s in validated %}
+        <tr>
+          <td><code>{{ s.get('id', '') }}</code></td>
+          <td>{{ s.get('name', '') }}</td>
+          <td>{{ s.get('email', '') }}</td>
+          <td>{{ s.get('plan', '') }}</td>
+          <td><code>{{ s.get('username', '') }}</code></td>
+          <td>{{ s.get('validated_at', '') }}</td>
+          <td class="actions">
+            {% if s.get('show_email_sent') %}
+            <span style="background:#1a3a2a;color:#7bf1a8;padding:6px 12px;border-radius:6px;font-size:12px;display:inline-block;border:1px solid rgba(0,255,136,0.35)">📧 Email envoyé ✅</span>
+            {% endif %}
+            {% if s.get('wa_client_url') %}
+            <a href="{{ s.get('wa_client_url') }}"
+               target="_blank" rel="noopener noreferrer"
+               style="background:#25D366;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-block">
+              📱 Accès WhatsApp client
+            </a>
+            {% endif %}
+            {% if not s.get('show_email_sent') and not s.get('wa_client_url') %}
+            <span style="color:var(--muted);font-size:12px">—</span>
+            {% endif %}
+            {% if s.get('username') %}
+            <a href="/admin/reset/{{ s.get('username') | urlencode }}"
+               style="background:#ff8c00;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:11px;margin-left:4px;display:inline-block"
+               onclick="return confirm('Réinitialiser les accès ?');">
+              🔄 Reset
+            </a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Aucun abonnement validé.</p>
+    {% endif %}
+
+    <h2>Refusés</h2>
+    {% if rejected %}
+    <table>
+      <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Plan</th><th>Refusé</th></tr></thead>
+      <tbody>
+        {% for s in rejected %}
+        <tr>
+          <td><code>{{ s.get('id', '') }}</code></td>
+          <td>{{ s.get('name', '') }}</td>
+          <td>{{ s.get('email', '') }}</td>
+          <td>{{ s.get('plan', '') }}</td>
+          <td>{{ s.get('rejected_at', '') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">Aucun refus.</p>
+    {% endif %}
+  </div>
+</body>
+</html>

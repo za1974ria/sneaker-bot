@@ -1,0 +1,362 @@
+{
+  "On Running Cloudmonster": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 180.0,
+    "updated_at": 1775581097.102462
+  },
+  "On Running Cloudflow": {
+    "min": 55.0,
+    "max": 268.94,
+    "avg": 95.99,
+    "updated_at": 1775581158.0568604
+  },
+  "On Running Cloudswift": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 130.0,
+    "updated_at": 1775581217.5742471
+  },
+  "On Running Cloudsurfer": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 160.0,
+    "updated_at": 1775581275.1123905
+  },
+  "On Running Cloud X": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 190.01,
+    "updated_at": 1775581339.4444757
+  },
+  "Converse Chuck Taylor": {
+    "min": 55.0,
+    "max": 268.94,
+    "avg": 78.19,
+    "updated_at": 1775581409.5725594
+  },
+  "Converse Run Star Hike": {
+    "min": 55.42,
+    "max": 363.17,
+    "avg": 225.06,
+    "updated_at": 1775581465.4543266
+  },
+  "Converse Weapon": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 210.03,
+    "updated_at": 1775581521.471575
+  },
+  "Converse One Star": {
+    "min": 55.0,
+    "max": 280.01,
+    "avg": 210.03,
+    "updated_at": 1775581574.743172
+  },
+  "Converse Pro Leather": {
+    "min": 55.0,
+    "max": 374.17,
+    "avg": 210.03,
+    "updated_at": 1775581633.2159982
+  },
+  "Converse Chuck 70": {
+    "min": 55.0,
+    "max": 280.01,
+    "avg": 153.01,
+    "updated_at": 1775581687.4415457
+  },
+  "Nike Air Max": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 98.0,
+    "updated_at": 1775584870.5074341
+  },
+  "Nike Air Force 1": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 110.0,
+    "updated_at": 1775584934.2626143
+  },
+  "Nike Pegasus": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 142.5,
+    "updated_at": 1775584990.0173771
+  },
+  "Nike Dunk Low": {
+    "min": 55.0,
+    "max": 360.17,
+    "avg": 95.72,
+    "updated_at": 1775585050.1925712
+  },
+  "Nike ZoomX": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 147.5,
+    "updated_at": 1775585104.6504023
+  },
+  "Nike React Infinity": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 150.0,
+    "updated_at": 1775585159.446096
+  },
+  "Adidas Samba": {
+    "min": 55.0,
+    "max": 268.94,
+    "avg": 92.72,
+    "updated_at": 1775585217.904206
+  },
+  "Adidas Gazelle": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 92.72,
+    "updated_at": 1775585277.0016358
+  },
+  "Adidas Campus": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 95.99,
+    "updated_at": 1775585335.9456172
+  },
+  "Adidas Ultraboost": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 140.0,
+    "updated_at": 1775585388.0432963
+  },
+  "Adidas NMD R1": {
+    "min": 55.0,
+    "max": 268.94,
+    "avg": 95.72,
+    "updated_at": 1775585450.3434968
+  },
+  "Adidas Forum Low": {
+    "min": 55.0,
+    "max": 268.94,
+    "avg": 90.0,
+    "updated_at": 1775585512.4119983
+  },
+  "New Balance 550": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 120.0,
+    "updated_at": 1775585568.5693176
+  },
+  "New Balance 574": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 120.0,
+    "updated_at": 1775585696.0464678
+  },
+  "New Balance 9060": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 95.72,
+    "updated_at": 1775585754.1084917
+  },
+  "New Balance 2002R": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 210.03,
+    "updated_at": 1775585803.8094373
+  },
+  "New Balance 1906R": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 95.22,
+    "updated_at": 1775585868.8608327
+  },
+  "New Balance 327": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 120.0,
+    "updated_at": 1775585939.2474477
+  },
+  "Puma Suede Classic": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 115.0,
+    "updated_at": 1775585994.7620578
+  },
+  "Puma RS-X": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 225.06,
+    "updated_at": 1775586052.3803904
+  },
+  "Puma Palermo": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 95.22,
+    "updated_at": 1775586114.951025
+  },
+  "Puma Clyde": {
+    "min": 55.42,
+    "max": 322.17,
+    "avg": 225.06,
+    "updated_at": 1775586167.9773645
+  },
+  "Puma Future Rider": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 225.06,
+    "updated_at": 1775586216.405802
+  },
+  "Puma Slipstream": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 95.22,
+    "updated_at": 1775579279.5568242
+  },
+  "Asics Gel-Kayano": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 190.01,
+    "updated_at": 1775579343.4275765
+  },
+  "Asics Gel-Nimbus": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 102.5,
+    "updated_at": 1775579416.0248766
+  },
+  "Asics Gel-Lyte III": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 102.5,
+    "updated_at": 1775579494.4532516
+  },
+  "Asics GT-2000": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 172.03,
+    "updated_at": 1775579559.4246008
+  },
+  "Asics Novablast": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 100.0,
+    "updated_at": 1775579632.129692
+  },
+  "Asics Gel-1130": {
+    "min": 55.0,
+    "max": 280.01,
+    "avg": 95.44,
+    "updated_at": 1775579700.3167565
+  },
+  "Jordan Jordan 1 Low": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 95.44,
+    "updated_at": 1775579767.142026
+  },
+  "Jordan Jordan 1 Mid": {
+    "min": 55.0,
+    "max": 268.94,
+    "avg": 92.72,
+    "updated_at": 1775579839.9241452
+  },
+  "Jordan Jordan 3": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 76.39,
+    "updated_at": 1775579913.8553126
+  },
+  "Jordan Jordan 4": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 103.0,
+    "updated_at": 1775579977.4050071
+  },
+  "Jordan Jordan 11": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 165.01,
+    "updated_at": 1775580037.2229695
+  },
+  "Jordan Jordan 5": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 100.0,
+    "updated_at": 1775580108.9179726
+  },
+  "Reebok Club C 85": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 95.44,
+    "updated_at": 1775580169.973114
+  },
+  "Reebok Classic Leather": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 95.72,
+    "updated_at": 1775580266.2291756
+  },
+  "Reebok Nano X": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 153.01,
+    "updated_at": 1775580340.9296393
+  },
+  "Reebok Question Mid": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 90.0,
+    "updated_at": 1775580411.7986276
+  },
+  "Reebok Floatride": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 90.0,
+    "updated_at": 1775580478.6131155
+  },
+  "Reebok Instapump Fury": {
+    "min": 55.42,
+    "max": 268.94,
+    "avg": 90.0,
+    "updated_at": 1775580553.8918824
+  },
+  "Salomon XT-6": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 205.01,
+    "updated_at": 1775580613.5628676
+  },
+  "Salomon ACS Pro": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 205.01,
+    "updated_at": 1775580675.4301143
+  },
+  "Salomon Speedcross": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 160.0,
+    "updated_at": 1775580735.8307977
+  },
+  "Salomon XT-Wings 2": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 190.0,
+    "updated_at": 1775580794.3202882
+  },
+  "Salomon Pulsar Trail": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 180.0,
+    "updated_at": 1775580855.0759192
+  },
+  "Salomon Sense Ride": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 160.0,
+    "updated_at": 1775580914.514595
+  },
+  "On Running Cloud 5": {
+    "min": 55.42,
+    "max": 280.01,
+    "avg": 180.0,
+    "updated_at": 1775580975.3298573
+  }
+}

@@ -1,0 +1,23 @@
+============================================================
+ANALYSE DONNEES SNEAKERBOT
+============================================================
+Lignes CSV: 147
+Colonnes: ['brand', 'model', 'market', 'price_min', 'price_max', 'price_avg', 'updated_at']
+Prix moyen global: 112.49
+Prix min global: 40.00
+Prix max global: 250.00
+Nike: 25
+Adidas: 18
+New Balance: 17
+Puma: 14
+Asics: 13
+Converse: 13
+Reebok: 13
+On Running: 12
+Vans: 12
+Salomon: 10
+Catalogue: 148 modeles, CSV: 147, manquants: 1
+Sans ligne CSV (echantillon 15):
+  - Salomon ACS Pro Women
+Suspects min<30: 0, max>800: 0, spread>200%: 0
+Top shops par nb lignes:

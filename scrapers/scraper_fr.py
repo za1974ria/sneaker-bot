@@ -476,7 +476,7 @@ class FranceScraper(BaseScraper):
             ("Courir", lambda s, b, m: s._scrape_courir(b, m)),
             ("Foot Locker", lambda s, b, m: s._scrape_footlocker(b, m)),
             ("Snipes", lambda s, b, m: s._scrape_snipes(b, m)),
-            ("Sports Direct", lambda s, b, m: s._scrape_sportsdirect(b, m)),
+            # ("Sports Direct", lambda s, b, m: s._scrape_sportsdirect(b, m)),  # Désactivé 2026-04-07 — timeout 100%, bloqué même via proxy
         ]
         for disp, cls in TIER1_EXTRA_SCRAPER_CLASSES:
             jobs.append((disp, lambda s, b, m, d=disp, c=cls: s._scrape_tier1_site(d, c, b, m)))

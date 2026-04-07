@@ -4,7 +4,7 @@
     {"name": "footlocker.fr", "url": "https://www.footlocker.fr", "active": true, "tier": 1, "method": "requests", "scraper": "FranceScraper"},
     {"name": "snipes.com/fr", "url": "https://www.snipes.com/fr", "active": true, "tier": 1, "method": "requests", "scraper": "FranceScraper"},
     {"name": "snipes.com/fr-fr", "url": "https://www.snipes.com/fr-fr", "active": false, "tier": 1, "method": "requests", "scraper": "SnipesFrFrScraper"},
-    {"name": "sportsdirect.com", "url": "https://www.sportsdirect.com", "active": true, "tier": 1, "method": "requests", "scraper": "FranceScraper"},
+    {"name": "sportsdirect.com", "url": "https://www.sportsdirect.com", "active": false, "tier": 1, "method": "requests", "scraper": "FranceScraper", "notes": "Désactivé 2026-04-07 — Playwright timeout 100%, bloqué même via proxy IPRoyal"},
     {"name": "spartoo.com", "url": "https://www.spartoo.com", "active": true, "tier": 1, "method": "requests", "scraper": "SpartooScraper"},
     {"name": "zalando.fr", "url": "https://www.zalando.fr", "active": true, "tier": 1, "method": "requests", "scraper": "ZalandoScraper", "notes": "Réactivé 2026-04-07 — proxy IPRoyal geo.iproyal.com:12321 injecté"},
     {"name": "basket4ballers.com", "url": "https://www.basket4ballers.com", "active": false, "tier": 1, "method": "requests", "scraper": "Basket4BallersScraper"},

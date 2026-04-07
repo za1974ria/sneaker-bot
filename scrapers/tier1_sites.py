@@ -319,7 +319,26 @@ class SpartooScraper:
             f"{self.BASE_URL}/Search.php?p=1&st={q}",
             f"{self.BASE_URL}/search.php?search={q}",
         ]
-        return _scrape_search_urls(self.SOURCE_NAME, brand, model, urls)
+        hits = _scrape_search_urls(self.SOURCE_NAME, brand, model, urls)
+        if hits:
+            return hits
+        # Fallback ScrapingBee (Spartoo bloque les requests directes)
+        bee_key = os.getenv("SCRAPINGBEE_API_KEY", "").strip()
+        if not bee_key:
+            return []
+        bee_url = f"{self.BASE_URL}/search/?search={q}"
+        try:
+            r = requests.get(
+                "https://app.scrapingbee.com/api/v1/",
+                params={"api_key": bee_key, "url": bee_url, "render_js": "false", "country_code": "fr"},
+                timeout=30,
+            )
+            if r.status_code == 200 and r.text:
+                prices = extract_search_result_prices(r.text, brand, model)
+                return [_build_hit(brand, model, p, self.SOURCE_NAME, bee_url) for p in prices[:8]]
+        except Exception as e:
+            logger.warning("[Spartoo] ScrapingBee fallback erreur: %s", e)
+        return []
 
 
 class ZalandoScraper:
@@ -584,7 +603,7 @@ class FootshopScraper:
 # E-com Tier 1 (sans grande distribution — voir ``hypermarches``).
 TIER1_ECOM_EXTRA_SCRAPER_CLASSES: tuple[tuple[str, type], ...] = (
     ("Zalando", ZalandoScraper),  # Réactivé 2026-04-07 — proxy IPRoyal injecté
-    ("JD Sports", JdSportsScraper),
+    # ("JD Sports", JdSportsScraper),  # Désactivé 2026-04-07 — Playwright timeout 100%, bloqué même via proxy
     ("Intersport", IntersportScraper),
     ("Spartoo", SpartooScraper),
 )

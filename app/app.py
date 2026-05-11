@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import warnings
+# Supprimer le flood de warnings sklearn dans les logs journald
+warnings.filterwarnings("ignore", message=".*sklearn.utils.parallel.delayed.*", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*should be used with.*Parallel.*", category=UserWarning)
+
 import bcrypt
 import json
 import logging
 import os
+import re
+import importlib
+import sys
 import secrets
 import smtplib
 import string
+import urllib.error
+import urllib.request
 import threading
 import time
 import csv
+import statistics
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -22,24 +33,35 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.analytics.tracker import get_stats, log_event
-from app.scraper_monitor import get_scraper_health_rows, init_scraper_monitor_db
+from app.db import DatabaseManager
+from app.analytics.tracker import clear_tracker_caches, get_scraper_health_rows, get_stats, log_event
+from app.scraper_monitor import init_scraper_monitor_db
 from app.subscription_manager import (
     build_whatsapp_admin_wa_me_url,
+    build_whatsapp_client_access_url,
     build_whatsapp_client_login_wa_me_url,
+    create_direct_access,
+    delete_subscription,
+    extend_trial,
     get_all_subscriptions,
     get_admin_whatsapp_digits,
     get_pending_subscriptions,
     get_unsent_admin_notifications,
+    grant_free_trial,
     public_base_url,
+    reactivate_user,
     reject_subscription,
+    send_premium_welcome_email,
     submit_subscription,
+    suspend_user,
     validate_subscription,
 )
 from app.ai_supervisor import AISupervisor
+from app.data import SNEAKER_IMAGE_MAP, normalize_key
 
 from app.services.market_service import (
     get_arbitrage_opportunities,
@@ -47,31 +69,89 @@ from app.services.market_service import (
     get_market_products,
     get_market_snapshot,
 )
+from app.api.v2_routes import router as v2_router
+from app.routes.mission_control import router as mission_control_router
+
+# Celery : broker + tâche refresh FR (import explicite pour clarté ops / workers)
+from celery_app import app as celery_app
+from app.fr_job_runner import (
+    fr_refresh_is_running,
+    get_api_refresh_status,
+    note_refresh_job_id,
+    refresh_fr_market,
+)
+from app.visitors import export_visits_csv, get_visitors_summary, init_visitors_db, track_visit
+
+_last_images = set()
+
+logger = logging.getLogger(__name__)
 
 _scheduler_started = False
+_whatsapp_worker_thread: threading.Thread | None = None
+_whatsapp_worker_stop = threading.Event()
 # Entrypoint de production officiel: `uvicorn app.app:app` (service systemd sneaker_bot.service).
 # Les autres points d'entrée du repo sont conservés pour compatibilité/dev.
 PROD_ENTRYPOINT = "app.app:app"
 
 
+def _load_scheduler_module():
+    """
+    Charge le module scheduler de manière robuste:
+    - tentative import standard
+    - fallback en ajoutant la racine projet au sys.path
+    """
+    # Priorité au module packagé (app.scheduler), puis fallback legacy (scheduler).
+    try:
+        return importlib.import_module("app.scheduler")
+    except ModuleNotFoundError:
+        try:
+            return importlib.import_module("scheduler")
+        except ModuleNotFoundError:
+            project_root = Path(__file__).resolve().parent.parent
+            root_str = str(project_root)
+            if root_str not in sys.path:
+                sys.path.insert(0, root_str)
+            return importlib.import_module("app.scheduler")
+
+
+def _ensure_scheduler_refresh_job(scheduler_mod) -> None:
+    """
+    NE PAS modifier la cadence FR définie dans scheduler.py (2x/jour à 08h et 20h).
+    Cette fonction est conservée pour compatibilité mais ne remplace plus le cron.
+    """
+    # Désactivé intentionnellement : le scheduler.py impose déjà 2x/jour (08h00 + 20h00).
+    # Ne pas rétablir sans décision explicite.
+    pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Démarre le scheduler de scraping une seule fois par processus.
+    Démarre le scheduler APScheduler une seule fois par processus.
+    Les jobs cron FR complets enfilent la tâche Celery `refresh_fr_market` (worker séparé),
+    sans bloquer le thread du scheduler ni l'event loop FastAPI.
     En cas d'échec, l'erreur est loggée sans faire tomber l'application.
     """
     global _scheduler_started
     if not _scheduler_started:
         try:
-            from scheduler import start_scheduler
-
-            start_scheduler()
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "Échec du démarrage du scheduler de scraping (APScheduler)"
-            )
+            scheduler_mod = _load_scheduler_module()
+            start_scheduler = getattr(scheduler_mod, "start_scheduler", None)
+            if callable(start_scheduler):
+                start_scheduler()
+                _ensure_scheduler_refresh_job(scheduler_mod)
+                is_running = getattr(scheduler_mod, "scheduler_is_running", None)
+                if callable(is_running) and not bool(is_running()):
+                    # Retry silencieux une fois pour garantir le démarrage effectif.
+                    start_scheduler()
+                    _ensure_scheduler_refresh_job(scheduler_mod)
+            else:
+                logger.info("Scheduler indisponible: start_scheduler non trouvé")
+        except Exception as exc:
+            logger.info("Scheduler non démarré (mode silencieux): %s", exc)
         else:
             _scheduler_started = True
+    logger.info("Celery broker prêt (app=%s)", getattr(celery_app, "main", "?"))
     try:
         from app.google_shopping_verifier import init_google_cache
 
@@ -83,22 +163,123 @@ async def lifespan(app: FastAPI):
     except Exception:
         logging.getLogger(__name__).exception("Échec init_scraper_monitor_db (SQLite)")
     try:
+        init_visitors_db()
+    except Exception:
+        logging.getLogger(__name__).exception("Échec init_visitors_db (SQLite)")
+    try:
         from scrapers.sitemap_scraper import init_sitemap_db
 
         init_sitemap_db()
     except Exception:
         logging.getLogger(__name__).exception("Échec init_sitemap_db (SQLite)")
+    # Worker WhatsApp: désactivé par défaut au startup (ENABLE_WHATSAPP=false).
+    # Le module `app.whatsapp_sender` reste utilisable manuellement si nécessaire.
+    whatsapp_enabled = (os.getenv("ENABLE_WHATSAPP", "false").strip().lower() in {"1", "true", "yes", "on"})
+    if whatsapp_enabled:
+        try:
+            from app.whatsapp_sender import process_pending_notifications
+
+            def _run_whatsapp_worker() -> None:
+                while not _whatsapp_worker_stop.is_set():
+                    try:
+                        sent = process_pending_notifications()
+                        if sent:
+                            logger.info("WhatsApp worker: %d notification(s) envoyée(s)", sent)
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("WhatsApp worker tick error: %s", e)
+                    _whatsapp_worker_stop.wait(30.0)
+
+            global _whatsapp_worker_thread
+            if _whatsapp_worker_thread is None or not _whatsapp_worker_thread.is_alive():
+                _whatsapp_worker_stop.clear()
+                _whatsapp_worker_thread = threading.Thread(target=_run_whatsapp_worker, daemon=True)
+                _whatsapp_worker_thread.start()
+        except Exception:
+            logging.getLogger(__name__).exception("Échec démarrage worker WhatsApp")
+    else:
+        logger.info("WhatsApp worker désactivé au startup (ENABLE_WHATSAPP=false)")
     _log_critical_env_status()
+    try:
+        from app.central_cache import init_central_cache
+
+        init_central_cache()
+    except Exception:
+        logger.exception("init_central_cache")
+    try:
+        from app.csv_preload import preload_market_csvs
+
+        preload_market_csvs()
+    except Exception:
+        logger.exception("preload_market_csvs")
     yield
+    # Arrêt du worker WhatsApp.
+    try:
+        _whatsapp_worker_stop.set()
+        if _whatsapp_worker_thread and _whatsapp_worker_thread.is_alive():
+            _whatsapp_worker_thread.join(timeout=2.0)
+    except Exception:
+        pass
+    # Arrêt propre du scheduler pour éviter les timeouts systemd.
+    try:
+        scheduler_mod = _load_scheduler_module()
+        shutdown_scheduler = getattr(scheduler_mod, "shutdown_scheduler", None)
+        if callable(shutdown_scheduler):
+            shutdown_scheduler()
+    except Exception as exc:
+        logger.info("Scheduler shutdown ignoré: %s", exc)
 
 
 app = FastAPI(title="Sneaker Bot", lifespan=lifespan)
+app.include_router(v2_router)
+app.include_router(mission_control_router)
 
-logger = logging.getLogger(__name__)
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    path = request.url.path or "/"
+    if path.startswith("/api/"):
+        return JSONResponse({"detail": exc.detail or "Erreur"}, status_code=int(exc.status_code or 500))
+    return templates.TemplateResponse(
+        "error.html",
+        {
+            "request": request,
+            "status_code": int(exc.status_code or 500),
+            "message": str(exc.detail or "Une erreur est survenue."),
+        },
+        status_code=int(exc.status_code or 500),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s: %s", request.url.path, exc)
+    path = request.url.path or "/"
+    if path.startswith("/api/"):
+        return JSONResponse({"detail": "Erreur serveur temporaire"}, status_code=500)
+    return templates.TemplateResponse(
+        "error.html",
+        {
+            "request": request,
+            "status_code": 500,
+            "message": "Une erreur temporaire est survenue. Réessayez dans quelques instants.",
+        },
+        status_code=500,
+    )
+
+# Fichiers publics (JS, JSON vitrine) — servis hors session ; le dossier disque `data/` reste non monté (données sensibles).
+_public_assets_dir = Path(__file__).resolve().parent.parent / "static"
+if _public_assets_dir.is_dir():
+    _pub = str(_public_assets_dir)
+    app.mount("/static", StaticFiles(directory=_pub), name="static")
+    app.mount("/data", StaticFiles(directory=_pub), name="data_public_assets")
 
 AUTH_USERNAME = (os.getenv("APP_LOGIN_USER") or "admin").strip()
-AUTH_PASSWORD = (os.getenv("APP_LOGIN_PASSWORD") or "admin123").strip()
-AUTH_TOKEN = (os.getenv("APP_AUTH_TOKEN") or "sneakerbot-auth-token").strip()
+# Si la variable d'environnement est absente, fallback sur un token aléatoire non devinable.
+# Cela rend l'authentification impossible sans .env plutôt que d'exposer un mot de passe codé en dur.
+_raw_password = os.getenv("APP_LOGIN_PASSWORD", "").strip()
+AUTH_PASSWORD = _raw_password if _raw_password else secrets.token_hex(32)
+_raw_token = os.getenv("APP_AUTH_TOKEN", "").strip()
+AUTH_TOKEN = _raw_token if _raw_token else secrets.token_hex(32)
 LOGIN_WINDOW_SEC = 10 * 60
 LOGIN_MAX_ATTEMPTS = 8
 LOGIN_BLOCK_SEC = 15 * 60
@@ -115,8 +296,14 @@ _unauth_hits_by_ip: dict[str, deque[float]] = defaultdict(deque)
 _banned_ips: dict[str, float] = {}
 TRUSTED_IPS = {"127.0.0.1", "::1", "localhost"}
 API_LIVE_GOOGLE_VERIFY_ENABLED = (os.getenv("API_LIVE_GOOGLE_VERIFY_ENABLED") or "0").strip() == "1"
-DATA_FRESHNESS_CACHE_TTL_SEC = 30
+DATA_FRESHNESS_CACHE_TTL_SEC = 600
 _data_freshness_cache: dict[str, object] = {"ts": 0.0, "payload": None}
+HEALTH_STATUS_CACHE_TTL_SEC = 600
+_health_status_cache: dict[str, object] = {"ts": 0.0, "payload": None}
+_health_status_cache_lock = threading.Lock()
+ANALYTICS_CACHE_TTL_SEC = 600
+_analytics_cache: dict[str, object] = {"ts": 0.0, "payload": None}
+_analytics_cache_lock = threading.Lock()
 
 
 def _log_critical_env_status() -> None:
@@ -143,8 +330,19 @@ MARKET_FR_SOURCES_CSV = Path(__file__).resolve().parent.parent / "data" / "marke
 MARKET_FR_CSV = Path(__file__).resolve().parent.parent / "data" / "market_fr.csv"
 FR_SOURCES_CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "fr_ecommerce_sources.json"
 FR_UPDATE_STATUS_PATH = Path(__file__).resolve().parent.parent / "data" / "fr_update_status.json"
+OPS_AUDIT_HISTORY_PATH = Path(__file__).resolve().parent.parent / "data" / "ops_health_history.json"
+_serpapi_probe_cache: dict[str, object] = {"ts": 0.0, "status": "timeout"}
+_SERPAPI_PROBE_TTL_SEC = 300.0
+
+# Cache in-mémoire pour api_comparison_fr (TTL 30 min) — évite les re-lectures CSV sous charge
+_comparison_cache: dict = {"payload": None, "mtime_sources": 0.0, "mtime_fr": 0.0, "ts": 0.0}
+_COMPARISON_CACHE_TTL = 1800  # secondes (30 min — réduit les rebuilds sous charge)
+# Cache in-mémoire pour models_with_history — rechargé toutes les 10 min max
+_history_cache: dict = {"models": None, "ts": 0.0}
+_HISTORY_CACHE_TTL = 600
 SECURITY_STATE_PATH = Path(__file__).resolve().parent.parent / "data" / "security_state.json"
-ACCESS_CONTROL_PATH = Path(__file__).resolve().parent.parent / "data" / "access_control.json"
+DB_PATH = Path(__file__).resolve().parent.parent / "data" / "sneakerbot.db"
+_db = DatabaseManager(DB_PATH)
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
@@ -197,6 +395,110 @@ def _fr_clock_health() -> tuple[str, str]:
     return "critical", "alerte horloge"
 
 
+def _parse_sync_dt(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt)
+        except Exception:
+            continue
+    return None
+
+
+def _resolve_last_sync_meta() -> tuple[datetime | None, str]:
+    # Utilise la source la plus récente pour éviter un label bloqué
+    # sur un ancien last_run SerpAPI.
+    candidates: list[tuple[datetime, str]] = []
+    try:
+        scheduler_mod = _load_scheduler_module()
+        get_serpapi_sync_status = getattr(scheduler_mod, "get_serpapi_sync_status", None)
+        if callable(get_serpapi_sync_status):
+            st = get_serpapi_sync_status()
+            if isinstance(st, dict):
+                if str(st.get("status") or "idle").lower() in {"ok", "degraded_but_ok"}:
+                    dt = _parse_sync_dt(st.get("last_run"))
+                    if dt is not None:
+                        candidates.append((dt, "serpapi"))
+    except Exception as _exc:
+        logger.debug("_resolve_last_sync_meta serpapi: %s", _exc)
+    fresh = _data_freshness_snapshot()
+    if isinstance(fresh, dict):
+        market_meta = fresh.get("market_fr_csv") or {}
+        if isinstance(market_meta, dict):
+            dt = _parse_sync_dt(market_meta.get("updated_at"))
+            if dt is not None:
+                candidates.append((dt, "market_csv"))
+    try:
+        scheduler_mod = _load_scheduler_module()
+        get_last_refresh_status = getattr(scheduler_mod, "get_last_refresh_status", None)
+        if callable(get_last_refresh_status):
+            st = get_last_refresh_status()
+            if isinstance(st, dict):
+                dt = _parse_sync_dt(st.get("last_end_at") or st.get("updated_at"))
+                if dt is not None:
+                    candidates.append((dt, "local_fallback"))
+    except Exception as _exc:
+        logger.debug("_resolve_last_sync_meta local_fallback: %s", _exc)
+    if candidates:
+        return max(candidates, key=lambda item: item[0])
+    return None, "unknown"
+
+
+def _format_last_sync_human() -> str:
+    dt, _source = _resolve_last_sync_meta()
+    if dt is None:
+        return "⚪ Sync inconnue"
+    age_minutes = max(0, int((datetime.now() - dt).total_seconds() // 60))
+    if age_minutes > 180:
+        return "🟠 Synchro en attente"
+    return f"🟢 Dernière synchro : il y a {min(age_minutes, 999)} min"
+
+
+def _probe_serpapi_status(timeout_sec: float = 8.0) -> str:
+    now_ts = time.time()
+    cached_ts = float(_serpapi_probe_cache.get("ts") or 0.0)
+    cached_status = str(_serpapi_probe_cache.get("status") or "")
+    if cached_status and (now_ts - cached_ts) <= _SERPAPI_PROBE_TTL_SEC:
+        return cached_status
+    api_key = str(os.getenv("SERPAPI_KEY") or "").strip()
+    if not api_key:
+        status = "invalid_key"
+    else:
+        req = urllib.request.Request(
+            f"https://serpapi.com/account.json?api_key={quote(api_key, safe='')}",
+            headers={"User-Agent": "sneakerbot-health/1.0"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
+                body = resp.read()
+            payload = json.loads(body.decode("utf-8", errors="replace") or "{}")
+            err_msg = str(payload.get("error") or payload.get("message") or "").lower()
+            if "invalid" in err_msg and "key" in err_msg:
+                status = "invalid_key"
+            elif "limit" in err_msg or "quota" in err_msg:
+                status = "quota_limit"
+            else:
+                status = "ok"
+        except urllib.error.HTTPError as exc:
+            if int(getattr(exc, "code", 0)) in {401, 403}:
+                status = "invalid_key"
+            elif int(getattr(exc, "code", 0)) in {429}:
+                status = "quota_limit"
+            else:
+                status = "timeout"
+        except Exception:
+            status = "timeout"
+    _serpapi_probe_cache["ts"] = now_ts
+    _serpapi_probe_cache["status"] = status
+    return status
+
+
 def _safe_csv_row_count(path: Path) -> int:
     if not path.is_file():
         return 0
@@ -222,6 +524,14 @@ def _safe_distinct_shops_count(path: Path) -> int:
 
 def _data_freshness_snapshot() -> dict[str, object]:
     now_ts = time.time()
+    try:
+        from app.central_cache import get_json
+
+        cc = get_json("data_freshness")
+        if isinstance(cc, dict) and cc:
+            return dict(cc)
+    except Exception as _exc:
+        logger.debug("central_cache get data_freshness: %s", _exc)
     cached_ts = float(_data_freshness_cache.get("ts") or 0.0)
     cached_payload = _data_freshness_cache.get("payload")
     if cached_payload is not None and (now_ts - cached_ts) <= DATA_FRESHNESS_CACHE_TTL_SEC:
@@ -246,7 +556,7 @@ def _data_freshness_snapshot() -> dict[str, object]:
 
     market = _meta(MARKET_FR_CSV, stale_after_minutes=360.0)
     market["rows"] = _safe_csv_row_count(MARKET_FR_CSV)
-    sources = _meta(MARKET_FR_SOURCES_CSV, stale_after_minutes=180.0)
+    sources = _meta(MARKET_FR_SOURCES_CSV, stale_after_minutes=360.0)
     sources["rows"] = _safe_csv_row_count(MARKET_FR_SOURCES_CSV)
     sources["distinct_shops"] = _safe_distinct_shops_count(MARKET_FR_SOURCES_CSV)
 
@@ -267,6 +577,12 @@ def _data_freshness_snapshot() -> dict[str, object]:
     payload = {"market_fr_csv": market, "market_fr_sources_csv": sources, "warnings": warnings}
     _data_freshness_cache["ts"] = now_ts
     _data_freshness_cache["payload"] = payload
+    try:
+        from app.central_cache import default_ttl_sec, set_json
+
+        set_json("data_freshness", payload, default_ttl_sec())
+    except Exception as _exc:
+        logger.debug("central_cache set data_freshness: %s", _exc)
     return dict(payload)
 
 
@@ -392,6 +708,7 @@ def _is_client_session(request: Request) -> bool:
     return _is_authenticated(request) and _session_role(request) == "client"
 
 
+
 def _hash_password(plain: str) -> str:
     """Retourne le hash bcrypt du mot de passe en clair."""
     return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -422,12 +739,13 @@ def _load_access_control() -> dict[str, object]:
             }
         ],
     }
-    if not ACCESS_CONTROL_PATH.is_file():
-        return default_payload
     try:
-        raw = json.loads(ACCESS_CONTROL_PATH.read_text(encoding="utf-8"))
+        raw = _db.get_access_control(
+            default_users=list(default_payload["users"]),  # type: ignore[arg-type]
+            default_sales_mode="open",
+        )
     except Exception:
-        logging.getLogger(__name__).exception("Lecture impossible: %s", ACCESS_CONTROL_PATH)
+        logging.getLogger(__name__).exception("Lecture access_control impossible (DB)")
         return default_payload
     if not isinstance(raw, dict):
         return default_payload
@@ -458,7 +776,7 @@ def _load_access_control() -> dict[str, object]:
 
 def _find_user(username: str, password: str) -> dict[str, object] | None:
     """
-    Authentifie contre data/access_control.json : clé « users », puis « accounts »,
+    Authentifie contre access_control (SQLite): clé « users », puis « accounts »,
     puis identifiants à la racine (ancien schéma admin).
     """
     uname = str(username or "").strip()
@@ -466,17 +784,12 @@ def _find_user(username: str, password: str) -> dict[str, object] | None:
     if not uname or not pw:
         return None
 
-    raw: dict[str, object] = {}
-    if ACCESS_CONTROL_PATH.is_file():
-        try:
-            loaded = json.loads(ACCESS_CONTROL_PATH.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                raw = loaded
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "Lecture access_control pour _find_user: %s", ACCESS_CONTROL_PATH
-            )
-            return None
+    try:
+        loaded = _load_access_control()
+        raw: dict[str, object] = loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        logging.getLogger(__name__).exception("Lecture access_control pour _find_user (DB)")
+        return None
 
     def _match_entry(entry: object) -> dict[str, object] | None:
         if not isinstance(entry, dict):
@@ -549,11 +862,8 @@ def _register_user(username: str, password: str, *, role: str = "client") -> tup
         }
     )
     out = {"sales_mode": payload.get("sales_mode") or "open", "users": users}
-    try:
-        ACCESS_CONTROL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        ACCESS_CONTROL_PATH.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        logging.getLogger(__name__).exception("Ecriture access_control impossible")
+    if not _db.save_access_control(out):
+        logging.getLogger(__name__).exception("Ecriture access_control impossible (DB)")
         return False, "Erreur serveur lors de l'inscription."
     return True, ""
 
@@ -571,24 +881,37 @@ def _require_auth_or_raise(request: Request) -> None:
 PUBLIC_PATHS_EXACT = frozenset(
     {
         "/",
+        "/landing",
         "/subscribe",
         "/login",
         "/register",
         "/mentions-legales",
         "/ping",
         "/health",
+        "/api/system_audit",
+        "/api/update/fr/status",
+        "/api/refresh/fr",
+        "/api/refresh/status",
+        "/api/comparison",
+        "/api/comparison/fr",
+        "/api/v2/comparison/fr",
         "/favicon.ico",
-        "/openapi.json",
-        "/docs",
-        "/redoc",
         "/robots.txt",
+        "/sitemap.xml",
     }
 )
+# /docs, /redoc, /openapi.json sont volontairement EXCLUS des chemins publics en production.
+# L'accès nécessite une session authentifiée.
 PUBLIC_PATH_PREFIXES = (
-    "/docs/",
-    "/redoc/",
     "/api/public/",
     "/api/subscription/",
+    "/api/v2/comparison/",
+    "/api/comparison/",
+    "/api/scorecard/",
+    "/api/update/",
+    "/api/radar-status",
+    "/static",
+    "/data",
 )
 
 
@@ -643,13 +966,32 @@ async def auth_gate_middleware(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    try:
+        path = request.url.path or "/"
+        if request.method.upper() == "GET" and not path.startswith("/static") and not path.startswith("/data"):
+            country = (
+                request.headers.get("cf-ipcountry")
+                or request.headers.get("x-country")
+                or request.headers.get("x-geo-country")
+                or ""
+            ).strip()
+            ua = (request.headers.get("user-agent") or "").strip()
+            track_visit(
+                ip=_client_ip(request),
+                path=path,
+                user_agent=ua,
+                country=country,
+                status_code=int(getattr(response, "status_code", 0) or 0),
+            )
+    except Exception as _exc:
+        logger.debug("track_visit failed: %s", _exc)
     return response
 
 
 # Validation "irréprochable" : précision prioritaire
-STRICT_MIN_SAMPLE_COUNT = 2
+STRICT_MIN_SAMPLE_COUNT = 1
 STRICT_MAX_SPREAD_RATIO = 1.75
-STRICT_MIN_SCORE = 74
+STRICT_MIN_SCORE = 60
 STRICT_MAX_MIDPOINT_DEVIATION_RATIO = 0.28
 
 
@@ -685,7 +1027,7 @@ def _public_shop_alias(shop_name: str) -> str:
         return "Source Agrégée"
     if s in {"manual fr", "manuel fr"}:
         return "Source Manuelle"
-    return "Retailer X"
+    return shop_name
 
 
 def _comparison_position_client(price_avgs: list[float], our_avg: float) -> str:
@@ -712,6 +1054,56 @@ def _comparison_position_client(price_avgs: list[float], our_avg: float) -> str:
     if frac >= 0.75:
         return "Haut de gamme"
     return "Milieu de gamme"
+
+
+def remove_outliers(prices: list[float]) -> list[float]:
+    if len(prices) < 5:
+        return prices
+
+    sorted_prices = sorted(prices)
+    q1 = sorted_prices[int(len(prices) * 0.25)]
+    q3 = sorted_prices[int(len(prices) * 0.75)]
+    iqr = q3 - q1
+
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+
+    filtered = [p for p in prices if lower <= p <= upper]
+
+    if len(filtered) < 3:
+        return prices
+
+    avg = sum(filtered) / len(filtered)
+    p_min = min(filtered)
+    p_max = max(filtered)
+
+    if avg > 0:
+        dispersion = (p_max - p_min) / avg
+    else:
+        dispersion = 0
+
+    if dispersion < 0.15:
+        low_ratio = 0.7
+        high_ratio = 1.4
+    elif dispersion < 0.4:
+        low_ratio = 0.5
+        high_ratio = 1.8
+    else:
+        low_ratio = 0.3
+        high_ratio = 2.5
+
+    filtered = [
+        p for p in filtered
+        if (low_ratio * avg) <= p <= (high_ratio * avg)
+    ]
+
+    # sécurité : éviter trop de suppression
+    if len(filtered) < 3:
+        return prices
+
+    logger.debug("[FILTER V2] disp=%.2f kept=%d", dispersion, len(filtered))
+
+    return filtered
 
 
 def _comparison_recommendation(
@@ -764,22 +1156,31 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+_catalog_cache: dict[str, list[str]] = {}
+_catalog_cache_ts: float = 0.0
+_CATALOG_CACHE_TTL = 60.0  # secondes
+
+
 def _load_models_catalog_from_json() -> dict[str, list[str]]:
     """
-    Charge data/models_list.json à chaque appel.
+    Charge data/models_list.json avec un cache TTL de 60s.
     Retourne { marque: [modèles...] } (ordre du fichier, sans doublons).
     """
+    global _catalog_cache, _catalog_cache_ts
+    now = time.monotonic()
+    if _catalog_cache and (now - _catalog_cache_ts) < _CATALOG_CACHE_TTL:
+        return _catalog_cache
     path = _project_root() / "data" / "models_list.json"
     if not path.is_file():
         logging.getLogger(__name__).warning("Fichier manquant: %s", path)
-        return {}
+        return _catalog_cache or {}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         logging.getLogger(__name__).exception("Lecture impossible: %s", path)
-        return {}
+        return _catalog_cache or {}
     if not isinstance(raw, list):
-        return {}
+        return _catalog_cache or {}
     out: dict[str, list[str]] = {}
     for item in raw:
         if not isinstance(item, dict):
@@ -792,6 +1193,8 @@ def _load_models_catalog_from_json() -> dict[str, list[str]]:
             out[b] = []
         if m not in out[b]:
             out[b].append(m)
+    _catalog_cache = out
+    _catalog_cache_ts = now
     return out
 
 
@@ -847,23 +1250,738 @@ def ping() -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+def _price_quality_snapshot() -> dict[str, object]:
+    try:
+        from scrapers.price_validator import validate_csv
+        result = validate_csv(MARKET_FR_SOURCES_CSV)
+        return {
+            "total_rows": result["total_rows"],
+            "valid_rows": result["valid_rows"],
+            "invalid_rows": result["invalid_rows"],
+            "invalid_ratio": f"{result['invalid_ratio'] * 100:.1f}%",
+        }
+    except Exception:
+        return {"error": "price_validator unavailable"}
+
+
+def _global_health_status_snapshot() -> dict[str, object]:
+    """
+    Snapshot santé global mis en cache (TTL 5 min) pour accélérer /health et dashboard.
+    """
+    now_ts = time.time()
+    try:
+        from app.central_cache import get_json
+
+        cc = get_json("health_global")
+        if isinstance(cc, dict) and cc:
+            return dict(cc)
+    except Exception as _exc:
+        logger.debug("central_cache get health_global: %s", _exc)
+    with _health_status_cache_lock:
+        cached_ts = float(_health_status_cache.get("ts") or 0.0)
+        cached_payload = _health_status_cache.get("payload")
+        if isinstance(cached_payload, dict) and (now_ts - cached_ts) <= HEALTH_STATUS_CACHE_TTL_SEC:
+            return dict(cached_payload)
+
+    last_refresh: dict[str, object] = {
+        "running": False,
+        "last_start_at": "",
+        "last_end_at": "",
+        "last_success": None,
+        "last_message": "",
+        "updated_at": "",
+    }
+    try:
+        scheduler_mod = _load_scheduler_module()
+        get_last_refresh_status = getattr(scheduler_mod, "get_last_refresh_status", None)
+        if callable(get_last_refresh_status):
+            data = get_last_refresh_status()
+            if isinstance(data, dict):
+                last_refresh.update(data)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("health last_refresh unavailable: %s", exc)
+
+    serp_sync = {
+        "last_run": "",
+        "status": "idle",
+        "next_run": "",
+        "quota_mode": "normal",
+    }
+    try:
+        scheduler_mod = _load_scheduler_module()
+        get_serpapi_sync_status = getattr(scheduler_mod, "get_serpapi_sync_status", None)
+        if callable(get_serpapi_sync_status):
+            data = get_serpapi_sync_status()
+            if isinstance(data, dict):
+                serp_sync.update(
+                    {
+                        "last_run": str(data.get("last_run") or ""),
+                        "status": str(data.get("status") or "idle"),
+                        "next_run": str(data.get("next_run") or ""),
+                        "quota_mode": str(data.get("quota_mode") or "normal"),
+                    }
+                )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("health serpapi_sync unavailable: %s", exc)
+
+    # ---- Calcul du statut global : healthy / degraded / critical ----
+    freshness_snap = _data_freshness_snapshot()
+    price_snap = _price_quality_snapshot()
+    health_warnings: list[str] = []
+
+    market_stale = bool((freshness_snap.get("market_fr_csv") or {}).get("stale"))
+    sources_stale = bool((freshness_snap.get("market_fr_sources_csv") or {}).get("stale"))
+    source_count = int((freshness_snap.get("market_fr_sources_csv") or {}).get("distinct_shops") or 0)
+
+    if market_stale:
+        health_warnings.append("market_fr.csv périmé (>6h)")
+    if sources_stale:
+        health_warnings.append("market_fr_sources.csv périmé (>6h)")
+    if source_count < 3:
+        health_warnings.append(f"Nombre de sources insuffisant : {source_count}")
+    if str(serp_sync.get("status") or "").startswith("error"):
+        health_warnings.append("SerpAPI en erreur")
+    if bool(last_refresh.get("running")) is False and last_refresh.get("last_success") is False:
+        health_warnings.append("Dernier refresh FR en échec")
+
+    if market_stale and sources_stale:
+        overall_status = "critical"
+        overall_ok = False
+    elif health_warnings:
+        overall_status = "degraded"
+        overall_ok = True
+    else:
+        overall_status = "healthy"
+        overall_ok = True
+    # ---- fin calcul statut ----
+
+    # ── P8 : métriques SerpAPI runtime (circuit breaker) ──────────────────
+    serpapi_enabled = bool(str(os.getenv("SERPAPI_KEY") or "").strip())
+    serpapi_runtime: dict[str, object] = {
+        "enabled": serpapi_enabled,
+        "circuit_open": False,
+        "open_for_sec": 0,
+        "consecutive_failures": 0,
+        "last_error": "",
+    }
+    try:
+        from app.google_shopping_verifier import get_serpapi_runtime_status
+        _rt = get_serpapi_runtime_status()
+        serpapi_runtime.update({
+            "enabled": serpapi_enabled,
+            "circuit_open": bool(_rt.get("circuit_open")),
+            "open_for_sec": int(_rt.get("open_for_sec") or 0),
+            "consecutive_failures": int(_rt.get("consecutive_failures") or 0),
+            "last_error": str(_rt.get("last_error") or ""),
+        })
+        if bool(_rt.get("circuit_open")):
+            health_warnings.append("SerpAPI circuit ouvert (erreurs consécutives)")
+    except Exception as _exc:  # noqa: BLE001
+        logger.debug("health serpapi_runtime unavailable: %s", _exc)
+
+    # ── PA3 : métriques budget mensuel SerpAPI ─────────────────────────────
+    serpapi_budget: dict[str, object] = {
+        "serpapi_calls_this_month": 0,
+        "serpapi_monthly_cap": 1000,
+        "serpapi_used_pct": 0.0,
+        "serpapi_budget_remaining": 1000,
+        "serpapi_budget_remaining_pct": 100.0,
+        "serpapi_daily_average": 0.0,
+        "serpapi_budget_status": "normal",
+        "serpapi_hard_stop": False,
+        "serpapi_override_active": False,
+    }
+    try:
+        from app.serpapi_budget import get_budget_status as _gbs
+        serpapi_budget.update(_gbs())
+        if bool(serpapi_budget.get("serpapi_hard_stop")):
+            health_warnings.append("SerpAPI hard stop actif (quota épuisé)")
+        elif str(serpapi_budget.get("serpapi_budget_status")) == "essential":
+            health_warnings.append("SerpAPI mode essential (quota >85%)")
+    except Exception as _exc:  # noqa: BLE001
+        logger.debug("health serpapi_budget unavailable: %s", _exc)
+    # ──────────────────────────────────────────────────────────────────────
+
+    payload = {
+        "ok": overall_ok,
+        "status": overall_status,
+        "warnings": health_warnings,
+        "service": "sneaker_bot",
+        "entrypoint": PROD_ENTRYPOINT,
+        "data_freshness": freshness_snap,
+        "price_quality": price_snap,
+        "last_refresh": last_refresh,
+        "serpapi_sync": serp_sync,
+        "serpapi_status": _probe_serpapi_status(timeout_sec=8.0),
+        "serpapi_runtime": serpapi_runtime,
+        "serpapi_budget": serpapi_budget,
+        "last_sync_human": _format_last_sync_human(),
+        "mobile_ready": True,
+    }
+    with _health_status_cache_lock:
+        _health_status_cache["ts"] = now_ts
+        _health_status_cache["payload"] = payload
+    try:
+        from app.central_cache import default_ttl_sec, set_json
+
+        set_json("health_global", payload, default_ttl_sec())
+    except Exception as _exc:
+        logger.debug("central_cache set health_global: %s", _exc)
+    return dict(payload)
+
+
+def _read_ops_audit_history() -> list[dict[str, object]]:
+    if not OPS_AUDIT_HISTORY_PATH.is_file():
+        return []
+    try:
+        raw = json.loads(OPS_AUDIT_HISTORY_PATH.read_text(encoding="utf-8"))
+        if not isinstance(raw, list):
+            return []
+        out: list[dict[str, object]] = []
+        for it in raw:
+            if isinstance(it, dict):
+                out.append(it)
+        return out
+    except Exception:
+        return []
+
+
+def _append_ops_audit_history(entry: dict[str, object]) -> None:
+    try:
+        hist = _read_ops_audit_history()
+        hist.append(entry)
+        now = datetime.now()
+        cutoff = now - timedelta(hours=24)
+        kept: list[dict[str, object]] = []
+        for it in hist:
+            ts = str(it.get("ts") or "")
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                continue
+            if dt >= cutoff:
+                kept.append(it)
+        OPS_AUDIT_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        OPS_AUDIT_HISTORY_PATH.write_text(json.dumps(kept[-720:], ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ops audit history write skip: %s", exc)
+
+
+def _analytics_snapshot() -> dict[str, object]:
+    """
+    Snapshot agrégé pour /analytics (TTL 5 min) afin d'éviter
+    de recalculer les mêmes statistiques à chaque requête.
+    """
+    now_ts = time.time()
+    try:
+        from app.central_cache import get_json
+
+        cc = get_json("analytics_snapshot")
+        if isinstance(cc, dict) and cc:
+            return dict(cc)
+    except Exception:
+        pass
+    with _analytics_cache_lock:
+        cached_ts = float(_analytics_cache.get("ts") or 0.0)
+        cached_payload = _analytics_cache.get("payload")
+        if isinstance(cached_payload, dict) and (now_ts - cached_ts) <= ANALYTICS_CACHE_TTL_SEC:
+            return dict(cached_payload)
+
+    stats = get_stats()
+    views = int(stats.get("search_views", 0) or 0)
+    clicks = int(stats.get("premium_clicks", 0) or 0)
+    conversion = round((clicks / views) * 100, 2) if views > 0 else 0.0
+    scraper_rows = get_scraper_health_rows()
+    up_rows = sum(1 for r in scraper_rows if bool(r.get("last_success")))
+    total_rows = len(scraper_rows)
+    coverage = round((up_rows / total_rows) * 100, 2) if total_rows else 0.0
+
+    # Fraîcheur basée sur la vraie date de MAJ du CSV sources FR.
+    freshness_label = "Inconnu"
+    freshness_color = "#94a3b8"
+    max_dt: datetime | None = None
+    try:
+        if MARKET_FR_SOURCES_CSV.is_file():
+            max_dt = datetime.fromtimestamp(MARKET_FR_SOURCES_CSV.stat().st_mtime)
+    except Exception:
+        max_dt = None
+    if max_dt is not None:
+        age_min = max(0, int((datetime.now() - max_dt).total_seconds() // 60))
+        if age_min <= 40:
+            freshness_label = f"Récent ({age_min} min)"
+            freshness_color = "#22c55e"
+        elif age_min <= 120:
+            freshness_label = f"A surveiller ({age_min} min)"
+            freshness_color = "#f59e0b"
+        else:
+            freshness_label = f"Ancien ({age_min} min)"
+            freshness_color = "#ef4444"
+
+    refresh_status_line = ""
+    try:
+        scheduler_mod = _load_scheduler_module()
+        get_last_refresh_status = getattr(scheduler_mod, "get_last_refresh_status", None)
+        if callable(get_last_refresh_status):
+            st = get_last_refresh_status()
+            if isinstance(st, dict):
+                if bool(st.get("running")):
+                    refresh_status_line = "Refresh pipeline en cours…"
+                elif st.get("last_success") is True:
+                    le = str(st.get("last_end_at") or "").strip()
+                    refresh_status_line = f"Dernier refresh réussi : {le}" if le else "Dernier refresh : OK"
+                elif st.get("last_success") is False:
+                    le = str(st.get("last_end_at") or "").strip()
+                    lm = str(st.get("last_message") or "").strip()
+                    refresh_status_line = (
+                        f"Dernier refresh en échec : {le} ({lm})" if le else f"Dernier refresh en échec ({lm})"
+                    )
+                else:
+                    le = str(st.get("last_end_at") or "").strip()
+                    if le:
+                        refresh_status_line = f"Dernier run : {le}"
+    except Exception:
+        pass
+
+    payload = {
+        "views": views,
+        "clicks": clicks,
+        "conversion": conversion,
+        "scraper_rows": scraper_rows,
+        "up_rows": up_rows,
+        "total_rows": total_rows,
+        "coverage": coverage,
+        "freshness_label": freshness_label,
+        "freshness_color": freshness_color,
+        "refresh_status_line": refresh_status_line,
+    }
+    with _analytics_cache_lock:
+        _analytics_cache["ts"] = now_ts
+        _analytics_cache["payload"] = payload
+    try:
+        from app.central_cache import default_ttl_sec, set_json
+
+        set_json("analytics_snapshot", payload, default_ttl_sec())
+    except Exception:
+        pass
+    return dict(payload)
+
+
+def _clear_app_memory_caches() -> None:
+    """Invalide les caches HTTP process-local (sans toucher au tracker JSON)."""
+    with _health_status_cache_lock:
+        _health_status_cache["ts"] = 0.0
+        _health_status_cache["payload"] = None
+    with _analytics_cache_lock:
+        _analytics_cache["ts"] = 0.0
+        _analytics_cache["payload"] = None
+    _data_freshness_cache["ts"] = 0.0
+    _data_freshness_cache["payload"] = None
+    _comparison_cache["payload"] = None
+    _comparison_cache["ts"] = 0.0
+    _history_cache["models"] = None
+    _history_cache["ts"] = 0.0
+
+
+def _clear_app_caches() -> dict[str, object]:
+    """Invalidate app-level caches and tracker caches."""
+    try:
+        from app.central_cache import invalidate_dashboard_keys
+
+        invalidate_dashboard_keys()
+    except Exception:
+        pass
+    clear_tracker_caches()
+    _clear_app_memory_caches()
+    return {"ok": True, "message": "Caches invalidés"}
+
+
 @app.get("/health")
 def health() -> JSONResponse:
+    return JSONResponse(_global_health_status_snapshot())
+
+
+@app.get("/api/system_audit")
+def api_system_audit() -> JSONResponse:
+    """
+    Audit production synthétique (lecture seule) pour supervision ops.
+    Aucun effet de bord, aucun refresh déclenché.
+    """
+    snap = _global_health_status_snapshot()
+    warnings_list: list[str] = []
+
+    # Frontend status (timeouts et fallback côté comparateur).
+    frontend_status = "ok"
+    try:
+        js_path = Path(__file__).resolve().parent.parent / "static" / "js" / "comparison_page.v2.js"
+        js = js_path.read_text(encoding="utf-8")
+        has_abort = "AbortController" in js
+        has_8s = "8000" in js
+        has_fallback_msg = "Aucune donnée immédiate disponible" in js
+        if not (has_abort and has_8s and has_fallback_msg):
+            frontend_status = "warning"
+            warnings_list.append("Frontend fetch hardening partielle (timeout/fallback message)")
+    except Exception:
+        frontend_status = "warning"
+        warnings_list.append("Frontend audit non lisible")
+
+    # Backend status
+    backend_status = "ok" if bool(snap.get("ok")) else "warning"
+    data_fresh = (snap.get("data_freshness") or {})
+    market_csv = (data_fresh.get("market_fr_csv") or {}) if isinstance(data_fresh, dict) else {}
+    market_sources = (data_fresh.get("market_fr_sources_csv") or {}) if isinstance(data_fresh, dict) else {}
+    if bool(market_csv.get("stale")) or bool(market_sources.get("stale")):
+        backend_status = "warning"
+        warnings_list.append("Data freshness dégradée (CSV stale)")
+
+    # Scheduler status + duplicate/overlap guards
+    scheduler_status = "ok"
+    try:
+        scheduler_mod = _load_scheduler_module()
+        scheduler_running = getattr(scheduler_mod, "scheduler_is_running", None)
+        if callable(scheduler_running) and not bool(scheduler_running()):
+            scheduler_status = "warning"
+            warnings_list.append("Scheduler arrêté")
+        serp_sync_status_fn = getattr(scheduler_mod, "get_serpapi_sync_status", None)
+        serp_sync = serp_sync_status_fn() if callable(serp_sync_status_fn) else {}
+    except Exception:
+        scheduler_status = "warning"
+        serp_sync = {}
+        warnings_list.append("Scheduler status indisponible")
+
+    # SerpApi runtime status
+    serpapi_status = _probe_serpapi_status(timeout_sec=8.0)
+    serpapi_runtime: dict[str, object] = {}
+    try:
+        from app.google_shopping_verifier import get_serpapi_runtime_status
+
+        serpapi_runtime = get_serpapi_runtime_status()
+        if bool(serpapi_runtime.get("circuit_open")) and serpapi_status == "ok":
+            serpapi_status = "degraded"
+            warnings_list.append("SerpApi circuit breaker ouvert (fallback local actif)")
+    except Exception:
+        serpapi_status = "warning"
+        warnings_list.append("SerpApi runtime status indisponible")
+
+    # Server load (best effort)
+    server_load = "ok"
+    load_score = 20
+    try:
+        import psutil  # type: ignore[import-untyped]
+
+        cpu = float(psutil.cpu_percent(interval=0.2))
+        ram = float(psutil.virtual_memory().percent)
+        if cpu > 85 or ram > 88:
+            server_load = "warning"
+            load_score = 10
+            warnings_list.append(f"Charge élevée cpu={cpu:.1f}% ram={ram:.1f}%")
+    except Exception:
+        cpu = ram = 0.0
+        warnings_list.append("Métriques charge système partielles")
+
+    # Score santé /100 (simple, lisible, stable)
+    score = 100
+    score -= 15 if frontend_status != "ok" else 0
+    score -= 20 if backend_status != "ok" else 0
+    score -= 20 if serpapi_status != "ok" else 0
+    score -= 20 if scheduler_status != "ok" else 0
+    score -= (20 - load_score)
+    health_score = max(0, min(100, int(score)))
+
+    payload = {
+        "health_score": health_score,
+        "serpapi_status": serpapi_status,
+        "frontend_status": frontend_status,
+        "backend_status": backend_status,
+        "scheduler_status": scheduler_status,
+        "server_load_status": server_load,
+        "serpapi_sync": serp_sync,
+        "serpapi_runtime": serpapi_runtime,
+        "warnings": warnings_list,
+    }
+    _append_ops_audit_history(
+        {
+            "ts": datetime.now().isoformat(),
+            "health_score": int(health_score),
+            "serpapi_status": str(serpapi_status),
+            "backend_status": str(backend_status),
+            "warnings_count": len(warnings_list),
+        }
+    )
+    return JSONResponse(payload)
+
+
+@app.get("/api/ops-health/history")
+def api_ops_health_history(request: Request) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"detail": "Authentification admin requise"}, status_code=401)
+    hist = _read_ops_audit_history()
+    last = hist[-1] if hist else {}
+    avg24 = 0.0
+    if hist:
+        try:
+            vals = [int(x.get("health_score") or 0) for x in hist]
+            avg24 = round(sum(vals) / max(1, len(vals)), 1)
+        except Exception:
+            avg24 = 0.0
     return JSONResponse(
         {
-            "ok": True,
-            "service": "sneaker_bot",
-            "entrypoint": PROD_ENTRYPOINT,
-            "data_freshness": _data_freshness_snapshot(),
+            "count": len(hist),
+            "avg_health_score_24h": avg24,
+            "current": last,
+            "items": hist[-120:],
         }
     )
 
 
+@app.get("/ops-health", response_class=HTMLResponse)
+def ops_health_page(request: Request) -> HTMLResponse:
+    if not _is_admin_session(request):
+        return RedirectResponse("/login?next=/ops-health", status_code=303)
+    return templates.TemplateResponse("ops_health.html", {"request": request})
+
+
+@app.get("/api/radar-status")
+def radar_status() -> JSONResponse:
+    """Endpoint radar — état système temps réel SneakerBot."""
+    import time
+    import os
+    import subprocess
+    from datetime import datetime
+
+    try:
+        import psutil
+        cpu  = psutil.cpu_percent(interval=0.3)
+        ram  = psutil.virtual_memory().percent
+        disk = psutil.disk_usage('/').percent
+    except Exception:
+        cpu = ram = disk = 0.0
+
+    # Uptime service
+    try:
+        result = subprocess.run(
+            ['systemctl', 'show', 'sneaker_bot',
+             '--property=ActiveEnterTimestamp'],
+            capture_output=True, text=True, timeout=3
+        )
+        uptime_raw = result.stdout.strip().split('=')[-1]
+    except Exception:
+        uptime_raw = 'N/A'
+
+    # Scrapers actifs
+    scraper_dir = os.path.join(os.path.dirname(__file__), '..', 'scrapers')
+    try:
+        scrapers_count = len([
+            f for f in os.listdir(scraper_dir)
+            if f.endswith('.py') and not f.startswith('_')
+        ])
+    except Exception:
+        scrapers_count = 19
+
+    # Dernière mise à jour fichier CSV marché
+    try:
+        data_paths = [
+            '/root/sneaker_bot/data/market_fr.csv',
+            '/root/sneaker_bot/market.csv',
+        ]
+        db_mtime = 0
+        for p in data_paths:
+            if os.path.exists(p):
+                mt = os.path.getmtime(p)
+                if mt > db_mtime:
+                    db_mtime = mt
+        last_update = int(time.time() - db_mtime) if db_mtime else 0
+    except Exception:
+        last_update = 0
+
+    nodes = [
+        {'label': 'PARIS',     'angle': 45,  'dist': 0.55, 'active': True,  'isHome': False},
+        {'label': 'LYON',      'angle': 130, 'dist': 0.70, 'active': True,  'isHome': False},
+        {'label': 'BORDEAUX',  'angle': 200, 'dist': 0.65, 'active': True,  'isHome': False},
+        {'label': 'BERLIN',    'angle': 290, 'dist': 0.80, 'active': False, 'isHome': False},
+        {'label': 'AMSTERDAM', 'angle': 340, 'dist': 0.60, 'active': True,  'isHome': False},
+        {'label': 'TLEMCEN',   'angle': 170, 'dist': 0.30, 'active': True,  'isHome': True},
+    ]
+
+    return JSONResponse({
+        'cpu':            round(cpu, 1),
+        'ram':            round(ram, 1),
+        'disk':           round(disk, 1),
+        'scrapers':       scrapers_count,
+        'last_update_sec': last_update,
+        'uptime':         uptime_raw,
+        'nodes':          nodes,
+        'status':         'ACTIVE',
+        'pipeline':       'v2',
+        'timestamp':      datetime.now().strftime('%H:%M:%S'),
+    })
+
+
+@app.post("/api/cache/clear")
+def api_cache_clear(request: Request) -> JSONResponse:
+    """Manual cache invalidation endpoint (admin only)."""
+    if not _is_admin_session(request):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    try:
+        return JSONResponse(_clear_app_caches())
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("cache clear failed: %s", exc)
+        return JSONResponse({"ok": False, "error": "cache_clear_failed"}, status_code=500)
+
+
+@app.post("/api/refresh/fr")
+def api_refresh_fr(_request: Request) -> JSONResponse:
+    """
+    Refresh marché FR : **uniquement** via Celery (`refresh_fr_market.delay()`).
+
+    Aucun scraping synchrone dans le processus uvicorn : réponse **202 Accepted** tout de suite
+    avec `job_id` : le worker exécute `run_fr_market_full` puis invalide caches / précharge CSV
+    (compatible SQLite, Redis, tracker existants).
+    """
+    if not _is_admin_session(_request):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    try:
+        if fr_refresh_is_running():
+            return JSONResponse(
+                {"accepted": False, "reason": "refresh_deja_en_cours"},
+                status_code=409,
+            )
+        async_result = refresh_fr_market.delay()
+        note_refresh_job_id(async_result.id)
+        return JSONResponse(
+            {
+                "accepted": True,
+                "job_id": async_result.id,
+                "message": "refresh_fr_accepte",
+                "started_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            status_code=202,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("refresh fr Celery indisponible: %s", exc)
+        return JSONResponse(
+            {
+                "accepted": False,
+                "error": "celery_broker_unavailable",
+                "detail": str(exc),
+            },
+            status_code=503,
+        )
+
+
+@app.get("/api/refresh/status")
+def api_refresh_status() -> JSONResponse:
+    """
+    État du dernier refresh FR : fichier `data/fr_update_status.json` + corrélation Celery
+    (`job_id`, `celery_state`, etc.). Léger : pas d’appel bloquant au worker.
+    """
+    return JSONResponse(get_api_refresh_status())
+
+
+@app.post("/api/update/fr")
+def api_update_fr(request: Request) -> JSONResponse:
+    """
+    Alias opérationnel du refresh FR complet (compat avec scripts de healthcheck).
+    """
+    return api_refresh_fr(request)
+
+
+@app.get("/favicon.ico")
+def favicon() -> RedirectResponse:
+    return RedirectResponse(url="/static/favicon.svg", status_code=301)
+
+
 @app.get("/robots.txt")
 def robots() -> PlainTextResponse:
+    base = public_base_url().rstrip("/") or "https://sneakerbot.shop"
     return PlainTextResponse(
-        "User-agent: *\nDisallow: /admin/\nDisallow: /api/\n",
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Allow: /landing\n"
+        "Allow: /comparison\n"
+        "Allow: /search\n"
+        "Allow: /product/\n"
+        "Allow: /subscribe\n"
+        "Disallow: /admin\n"
+        "Disallow: /analytics\n"
+        "Disallow: /supervisor\n"
+        "Disallow: /login\n"
+        "Disallow: /register\n"
+        "Disallow: /api/\n"
+        f"Sitemap: {base}/sitemap.xml\n",
         media_type="text/plain; charset=utf-8",
+    )
+
+
+@app.get("/sitemap.xml")
+def sitemap() -> Response:
+    base = public_base_url().rstrip("/") or "https://sneakerbot.shop"
+    urls = [
+        f"{base}/",
+        f"{base}/landing",
+        f"{base}/comparison",
+        f"{base}/search",
+        f"{base}/subscribe",
+        f"{base}/product/nike-air-force-1",
+        f"{base}/product/adidas-samba",
+        f"{base}/product/new-balance-530",
+        f"{base}/blog/meilleures-sneakers-2026",
+        f"{base}/blog/nike-air-force-1-vaut-elle-le-coup",
+        f"{base}/blog/ou-acheter-adidas-samba-moins-cher",
+    ]
+    now = datetime.now().strftime("%Y-%m-%d")
+    body = "".join(
+        f"<url><loc>{escape(u)}</loc><lastmod>{now}</lastmod><changefreq>daily</changefreq><priority>0.8</priority></url>"
+        for u in urls
+    )
+    content = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f"{body}</urlset>"
+    )
+    return Response(content=content, media_type="application/xml")
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_dashboard(request: Request) -> HTMLResponse:
+    if not _is_admin_session(request):
+        return RedirectResponse("/login?next=/admin", status_code=303)
+    return templates.TemplateResponse("admin_dashboard.html", {"request": request})
+
+
+@app.get("/admin/visitors", response_class=HTMLResponse)
+def admin_visitors_page(request: Request) -> HTMLResponse:
+    if not _is_admin_session(request):
+        return RedirectResponse("/login?next=/admin/visitors", status_code=303)
+    return templates.TemplateResponse("admin_visitors.html", {"request": request})
+
+
+@app.get("/api/admin/visitors/summary")
+def api_admin_visitors_summary(request: Request) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    try:
+        return JSONResponse(get_visitors_summary())
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("api_admin_visitors_summary failed: %s", exc)
+        return JSONResponse(
+            {
+                "today": {"unique_visitors": 0, "total_visits": 0, "page_views": 0},
+                "latest_visits": [],
+                "top_pages_24h": [],
+                "top_countries_7d": [],
+            }
+        )
+
+
+@app.get("/api/admin/visitors/export.csv")
+def api_admin_visitors_export_csv(request: Request) -> Response:
+    if not _is_admin_session(request):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    csv_text = export_visits_csv()
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=visitors_export.csv"},
     )
 
 
@@ -893,11 +2011,6 @@ async def subscribe_submit(request: Request) -> JSONResponse:
     email = str(body.get("email") or "").strip()
     plan = str(body.get("plan") or "").strip().lower()
     reference = str(body.get("reference") or "").strip()
-    whatsapp = str(body.get("whatsapp") or "").strip()
-    canal = str(body.get("canal") or "email").strip().lower()
-    if canal not in ("email", "whatsapp", "both"):
-        canal = "email"
-
     if not name:
         raise HTTPException(status_code=400, detail="Prénom / nom requis")
     if plan not in ("essai", "mensuel", "annuel"):
@@ -909,8 +2022,6 @@ async def subscribe_submit(request: Request) -> JSONResponse:
             email,
             plan,
             reference,
-            whatsapp=whatsapp,
-            canal=canal,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -944,25 +2055,41 @@ def admin_subscriptions(request: Request):
         d["wa_me_url"] = build_whatsapp_admin_wa_me_url(d)
         pending.append(d)
 
+    # Lire le statut active depuis access_control pour chaque user
+    _ac_users: dict[str, dict] = {}
+    try:
+        _ac = _load_access_control()
+        for _u in (_ac.get("users") or []):
+            if isinstance(_u, dict) and _u.get("username"):
+                _ac_users[str(_u["username"])] = _u
+    except Exception:
+        pass
+
     validated: list[dict[str, object]] = []
     for s in data.get("validated") or []:
         if not isinstance(s, dict):
             continue
         sub = dict(s)
-        canal_v = str(sub.get("canal") or "email").strip().lower()
-        if canal_v not in ("email", "whatsapp", "both"):
-            canal_v = "email"
-        sub["canal"] = canal_v
-        sub["show_email_sent"] = canal_v in ("email", "both") and bool(sub.get("email"))
-        wa = str(sub.get("whatsapp") or "").strip()
-        if canal_v in ("whatsapp", "both") and wa and sub.get("username"):
-            sub["wa_client_url"] = build_whatsapp_client_login_wa_me_url(
-                raw_whatsapp=wa,
-                username=str(sub.get("username") or ""),
+        sub["canal"] = "email"
+        sub["show_email_sent"] = bool(sub.get("email"))
+        uname = str(sub.get("username") or "")
+        # Statut actif/suspendu depuis access_control
+        _ac_user = _ac_users.get(uname, {})
+        sub["is_active"] = bool(_ac_user.get("active", True)) if _ac_user else True
+        sub["is_suspended"] = not sub["is_active"]
+        # Lien WA accès client (avec mot de passe si disponible)
+        if uname:
+            sub["wa_client_url"] = build_whatsapp_client_access_url(
+                sub,
+                personal_message=str(sub.get("personal_message") or ""),
+            )
+            sub["wa_login_url"] = build_whatsapp_client_login_wa_me_url(
+                username=uname,
                 password=str(sub.get("password") or ""),
             )
         else:
             sub["wa_client_url"] = None
+            sub["wa_login_url"] = None
         validated.append(sub)
 
     rejected = [s for s in (data.get("rejected") or []) if isinstance(s, dict)]
@@ -978,40 +2105,167 @@ def admin_subscriptions(request: Request):
     )
 
 
-@app.get("/admin/validate/{sub_id}")
-def admin_validate(sub_id: str, request: Request):
-    role = request.cookies.get("sb_role", "")
-    auth = request.cookies.get("sb_auth", "")
-
-    logger.info(
-        "ADMIN VALIDATE: role=[%s] auth=[%s]",
-        role,
-        (auth[:10] if auth else "VIDE"),
-    )
-
-    if role != "admin":
-        logger.warning("ADMIN VALIDATE: role manquant → login")
+def _do_validate(sub_id: str, request: Request):
+    # Vérification stricte : AUTH_TOKEN + rôle admin (double vérification).
+    if not _is_admin_session(request):
+        logger.warning("ADMIN VALIDATE: session invalide (sub_id=%s)", sub_id)
         return RedirectResponse("/login", status_code=303)
-
     try:
         validate_subscription(sub_id)
-        logger.info("✅ Abonnement %s validé", sub_id)
-    except Exception as e:
-        logger.error("❌ Erreur validation %s: %s", sub_id, e)
-
+        logger.info("Abonnement %s validé par admin", sub_id)
+    except Exception:
+        logger.exception("Erreur validation abonnement %s", sub_id)
     return RedirectResponse("/admin/subscriptions", status_code=303)
 
 
-@app.get("/admin/reject/{sub_id}")
-def admin_reject(sub_id: str, request: Request):
-    role = request.cookies.get("sb_role", "")
-    if role != "admin":
-        return RedirectResponse("/login")
+@app.post("/admin/validate/{sub_id}")
+def admin_validate_post(sub_id: str, request: Request):
+    return _do_validate(sub_id, request)
+
+# GET /admin/validate/{sub_id} supprimé — POST uniquement pour éviter CSRF via lien.
+
+
+def _do_reject(sub_id: str, request: Request):
+    if not _is_admin_session(request):
+        return RedirectResponse("/login", status_code=303)
     try:
         reject_subscription(sub_id)
+        logger.info("Abonnement %s refusé par admin", sub_id)
     except Exception:
-        pass
-    return RedirectResponse("/admin/subscriptions")
+        logger.exception("Erreur rejet abonnement %s", sub_id)
+    return RedirectResponse("/admin/subscriptions", status_code=303)
+
+
+@app.post("/admin/reject/{sub_id}")
+def admin_reject_post(sub_id: str, request: Request):
+    return _do_reject(sub_id, request)
+
+# GET /admin/reject/{sub_id} supprimé — POST uniquement.
+
+
+@app.post("/admin/delete/{sub_id}")
+def admin_delete_subscription(sub_id: str, request: Request):
+    """Suppression définitive d'une demande d'abonnement (toutes listes). POST uniquement."""
+    if not _is_admin_session(request):
+        return RedirectResponse("/login", status_code=303)
+    try:
+        deleted = delete_subscription(sub_id)
+        logger.info("ADMIN DELETE sub_id=%s name=%s", sub_id, deleted.get("name"))
+    except ValueError as e:
+        logger.warning("Admin delete: %s", e)
+    except Exception:
+        logger.exception("Erreur suppression abonnement %s", sub_id)
+    return RedirectResponse("/admin/subscriptions", status_code=303)
+
+
+@app.post("/admin/trial/{sub_id}")
+async def admin_grant_trial(sub_id: str, request: Request, days: int = Form(14)):
+    """Accorde un essai gratuit avec durée en jours. POST uniquement."""
+    if not _is_admin_session(request):
+        return RedirectResponse("/login", status_code=303)
+    days = max(1, min(int(days), 3650))  # 1 jour min, 10 ans max
+    try:
+        result = grant_free_trial(sub_id, days=days)
+        logger.info("ADMIN TRIAL sub_id=%s days=%s exp=%s", sub_id, days, result.get("trial_end"))
+    except ValueError as e:
+        logger.warning("Admin trial: %s", e)
+    except Exception:
+        logger.exception("Erreur essai gratuit %s", sub_id)
+    return RedirectResponse("/admin/subscriptions", status_code=303)
+
+
+@app.post("/admin/offer-access")
+async def admin_offer_access(
+    request: Request,
+    name: str = Form(""),
+    email: str = Form(""),
+    days: int = Form(7),
+    personal_message: str = Form(""),
+):
+    """Crée un accès découverte direct (sans demande préalable). POST uniquement."""
+    if not _is_admin_session(request):
+        return RedirectResponse("/login", status_code=303)
+    name = (name or "").strip()
+    email = (email or "").strip()
+    days = max(1, min(int(days), 3650))
+    try:
+        result = create_direct_access(
+            name=name,
+            email=email,
+            days=days,
+            personal_message=(personal_message or "").strip(),
+        )
+        logger.info("ADMIN OFFER-ACCESS name=%s email=%s days=%s id=%s", name, email, days, result.get("id"))
+    except ValueError as e:
+        logger.warning("Admin offer-access: %s", e)
+    except Exception:
+        logger.exception("Erreur création accès direct")
+    return RedirectResponse("/admin/subscriptions", status_code=303)
+
+
+@app.post("/admin/suspend/{username}")
+async def admin_suspend_user(username: str, request: Request):
+    """Suspend un compte client. POST uniquement."""
+    if not _is_admin_session(request):
+        return RedirectResponse("/login", status_code=303)
+    try:
+        suspend_user(username)
+        logger.info("ADMIN SUSPEND username=%s", username)
+    except ValueError as e:
+        logger.warning("Admin suspend: %s", e)
+    except Exception:
+        logger.exception("Erreur suspension %s", username)
+    return RedirectResponse("/admin/subscriptions", status_code=303)
+
+
+@app.post("/admin/reactivate/{username}")
+async def admin_reactivate_user(username: str, request: Request):
+    """Réactive un compte client suspendu. POST uniquement."""
+    if not _is_admin_session(request):
+        return RedirectResponse("/login", status_code=303)
+    try:
+        reactivate_user(username)
+        logger.info("ADMIN REACTIVATE username=%s", username)
+    except ValueError as e:
+        logger.warning("Admin reactivate: %s", e)
+    except Exception:
+        logger.exception("Erreur réactivation %s", username)
+    return RedirectResponse("/admin/subscriptions", status_code=303)
+
+
+@app.post("/admin/extend/{sub_id}")
+async def admin_extend_trial(sub_id: str, request: Request, days: int = Form(7)):
+    """Prolonge un essai de N jours supplémentaires. POST uniquement."""
+    if not _is_admin_session(request):
+        return RedirectResponse("/login", status_code=303)
+    days = max(1, min(int(days), 3650))
+    try:
+        result = extend_trial(sub_id, days=days)
+        logger.info("ADMIN EXTEND sub_id=%s days=%s new_end=%s", sub_id, days, result.get("trial_end"))
+    except ValueError as e:
+        logger.warning("Admin extend: %s", e)
+    except Exception:
+        logger.exception("Erreur prolongation %s", sub_id)
+    return RedirectResponse("/admin/subscriptions", status_code=303)
+
+
+@app.post("/admin/resend-email/{sub_id}")
+async def admin_resend_email(sub_id: str, request: Request):
+    """Renvoie l'email premium au client. POST uniquement."""
+    if not _is_admin_session(request):
+        return RedirectResponse("/login", status_code=303)
+    try:
+        data = get_all_subscriptions()
+        validated = [s for s in (data.get("validated") or []) if isinstance(s, dict)]
+        sub = next((s for s in validated if str(s.get("id")) == str(sub_id)), None)
+        if not sub:
+            logger.warning("Admin resend-email: sub_id %s introuvable", sub_id)
+        else:
+            send_premium_welcome_email(sub, personal_message=str(sub.get("personal_message") or ""))
+            logger.info("ADMIN RESEND-EMAIL sub_id=%s email=%s", sub_id, sub.get("email"))
+    except Exception:
+        logger.exception("Erreur renvoi email %s", sub_id)
+    return RedirectResponse("/admin/subscriptions", status_code=303)
 
 
 def _send_client_password_reset_email(to_addr: str, login: str, new_password: str) -> None:
@@ -1045,6 +2299,11 @@ def _send_client_password_reset_email(to_addr: str, login: str, new_password: st
         server.sendmail(smtp_user, msg["To"], msg.as_string())
 
 
+@app.post("/admin/reset/{username}", response_class=HTMLResponse)
+def admin_reset_credentials_post(username: str, request: Request) -> HTMLResponse:
+    return admin_reset_credentials(username, request)
+
+
 @app.get("/admin/reset/{username}", response_class=HTMLResponse)
 def admin_reset_credentials(username: str, request: Request) -> HTMLResponse:
     role = request.cookies.get("sb_role", "")
@@ -1060,13 +2319,12 @@ def admin_reset_credentials(username: str, request: Request) -> HTMLResponse:
         )
 
     try:
-        raw_text = ACCESS_CONTROL_PATH.read_text(encoding="utf-8")
-        data = json.loads(raw_text)
+        data = _load_access_control()
     except Exception:
-        logging.getLogger(__name__).exception("Lecture access_control pour reset")
+        logging.getLogger(__name__).exception("Lecture access_control pour reset (DB)")
         return HTMLResponse(
             content="<html><body style='background:#0d0d0d;color:#fff;padding:40px'>"
-            "<p>Fichier d’accès illisible.</p><a href='/admin/subscriptions' style='color:#00ff88'>Retour</a></body></html>",
+            "<p>Base d’accès illisible.</p><a href='/admin/subscriptions' style='color:#00ff88'>Retour</a></body></html>",
             status_code=500,
         )
 
@@ -1111,13 +2369,8 @@ def admin_reset_credentials(username: str, request: Request) -> HTMLResponse:
         )
 
     data["users"] = users
-    try:
-        ACCESS_CONTROL_PATH.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    except Exception:
-        logging.getLogger(__name__).exception("Écriture access_control après reset")
+    if not _db.save_access_control(data):
+        logging.getLogger(__name__).exception("Écriture access_control après reset (DB)")
         return HTMLResponse(
             content="<html><body style='background:#0d0d0d;color:#fff;padding:40px'>"
             "<p>Échec enregistrement.</p><a href='/admin/subscriptions' style='color:#00ff88'>Retour</a></body></html>",
@@ -1130,28 +2383,14 @@ def admin_reset_credentials(username: str, request: Request) -> HTMLResponse:
         except Exception:
             logging.getLogger(__name__).exception("Email reset mot de passe client")
 
-    u_esc = escape(uname)
-    pw_esc = escape(new_password)
-    email_note = (
-        f"<p style='color:#9ca3af'>Un email a été envoyé à <strong>{escape(target_email)}</strong>.</p>"
-        if target_email
-        else "<p style='color:#fbbf15'>Aucun email enregistré — communiquez le mot de passe au client.</p>"
-    )
-    return HTMLResponse(
-        content=f"""<!doctype html>
-<html lang="fr">
-<head><meta charset="utf-8"><title>Reset credentials</title></head>
-<body style="background:#0d0d0d;color:#fff;font-family:Arial,sans-serif;padding:40px;text-align:center">
-  <h2 style="color:#00ff88">✅ Credentials réinitialisés !</h2>
-  <div style="background:#111;border:1px solid #00ff88;border-radius:8px;padding:20px;
-              display:inline-block;margin:20px;text-align:left">
-    <p>👤 Login : <strong style="color:#00ff88">{u_esc}</strong></p>
-    <p>🔑 Nouveau mot de passe : <strong style="color:#00ff88">{pw_esc}</strong></p>
-  </div>
-  {email_note}
-  <p><a href="/admin/subscriptions" style="color:#00ff88">← Retour admin</a></p>
-</body>
-</html>"""
+    return templates.TemplateResponse(
+        "admin_reset_success.html",
+        {
+            "request": request,
+            "username": uname,
+            "new_password": new_password,
+            "target_email": target_email or None,
+        },
     )
 
 
@@ -1163,231 +2402,203 @@ def api_admin_notifications(request: Request) -> JSONResponse:
     return JSONResponse({"notifications": get_unsent_admin_notifications()})
 
 
-def _simple_login_html(
-    next_path: str,
-    error: str = "",
-    *,
-    sales_closed: bool = False,
-) -> str:
-    safe_next = escape(next_path if str(next_path).startswith("/") else "/comparison")
-    err_block = f"<div class='error'>❌ {escape(error)}</div>" if error else ""
-    closed_block = (
-        "<p style='text-align:center;font-size:12px;color:#facc15;margin-bottom:16px;"
-        "padding:8px;border:1px solid #854d0e;border-radius:8px;background:#1c1917'>"
-        "Accès public fermé : connectez-vous avec un compte client ou admin.</p>"
-        if sales_closed
-        else ""
+@app.post("/api/admin/whatsapp/test")
+def api_admin_whatsapp_test(request: Request) -> JSONResponse:
+    """Envoie un message WhatsApp de test à l'admin pour valider la configuration."""
+    role = request.cookies.get("sb_role", "")
+    if role != "admin":
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    try:
+        from app.whatsapp_sender import get_active_backend, send_whatsapp_message
+        admin_number = os.getenv("ADMIN_WHATSAPP_NUMBER", "").strip()
+        if not admin_number:
+            return JSONResponse({"ok": False, "error": "ADMIN_WHATSAPP_NUMBER non défini dans .env"}, status_code=400)
+        backend = get_active_backend()
+        test_msg = "✅ SneakerBot WhatsApp OK — backend: " + backend + " — " + __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M")
+        ok = send_whatsapp_message(admin_number, test_msg)
+        return JSONResponse({"ok": ok, "backend": backend, "to": "+" + admin_number})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+def compute_smart_score(prices: list, sources_count: int) -> int:
+    """
+    Calcule un score de fiabilité marché (0 à 100)
+    basé sur dispersion, volume et cohérence.
+    """
+    if not prices or len(prices) == 0:
+        return 30  # aucun signal
+
+    # Nettoyage
+    clean_prices = [p for p in prices if p and p > 0]
+
+    if len(clean_prices) == 0:
+        return 30
+
+    p_min = min(clean_prices)
+    p_max = max(clean_prices)
+    p_avg = sum(clean_prices) / len(clean_prices)
+
+    # --- DISPERSION ---
+    if p_avg == 0:
+        dispersion = 1
+    else:
+        dispersion = (p_max - p_min) / p_avg
+
+    # score dispersion (plus c’est serré → meilleur score)
+    if dispersion < 0.05:
+        score_dispersion = 90
+    elif dispersion < 0.15:
+        score_dispersion = 75
+    elif dispersion < 0.30:
+        score_dispersion = 55
+    else:
+        score_dispersion = 35
+
+    # --- NOMBRE DE SOURCES ---
+    if sources_count >= 15:
+        score_sources = 90
+    elif sources_count >= 8:
+        score_sources = 70
+    elif sources_count >= 4:
+        score_sources = 50
+    else:
+        score_sources = 30
+
+    # --- COHÉRENCE (écart max vs moyenne) ---
+    if p_avg == 0:
+        score_coherence = 40
+    elif abs(p_max - p_avg) / p_avg < 0.1:
+        score_coherence = 85
+    elif abs(p_max - p_avg) / p_avg < 0.25:
+        score_coherence = 65
+    else:
+        score_coherence = 40
+
+    # --- SCORE FINAL ---
+    final_score = int(
+        (score_dispersion * 0.4) +
+        (score_sources * 0.3) +
+        (score_coherence * 0.3)
     )
-    return f"""<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SneakerBot — Connexion</title>
-    <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{
-            background: #0d0d0d;
-            color: #fff;
-            font-family: system-ui, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }}
-        .card {{
-            background: #111;
-            border: 1px solid #222;
-            border-radius: 12px;
-            padding: 32px;
-            width: 100%;
-            max-width: 380px;
-        }}
-        h1 {{
-            color: #00ff88;
-            text-align: center;
-            margin-bottom: 8px;
-            font-size: 24px;
-        }}
-        p.sub {{
-            text-align: center;
-            color: #666;
-            font-size: 13px;
-            margin-bottom: 24px;
-        }}
-        label {{
-            display: block;
-            color: #aaa;
-            font-size: 13px;
-            margin-bottom: 4px;
-        }}
-        input {{
-            width: 100%;
-            padding: 12px;
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px;
-            color: #fff;
-            font-size: 15px;
-            margin-bottom: 16px;
-        }}
-        input:focus {{
-            outline: none;
-            border-color: #00ff88;
-        }}
-        button {{
-            width: 100%;
-            padding: 14px;
-            background: #00ff88;
-            color: #000;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-        }}
-        .error {{
-            background: #ff444422;
-            border: 1px solid #ff4444;
-            color: #ff6666;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            font-size: 13px;
-            text-align: center;
-        }}
-        .logo {{
-            text-align: center;
-            font-size: 40px;
-            margin-bottom: 8px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="card">
-        <div class="logo">👟</div>
-        <h1>SneakerBot</h1>
-        <p class="sub">Connectez-vous à votre espace</p>
-        {closed_block}
-        {err_block}
-        <form method="POST" action="/login">
-            <input type="hidden" name="next" value="{safe_next}">
-            <label>Identifiant</label>
-            <input type="text"
-                   name="username"
-                   placeholder="votre identifiant"
-                   autocomplete="username"
-                   autocorrect="off"
-                   autocapitalize="none"
-                   spellcheck="false"
-                   required>
-            <label>Mot de passe</label>
-            <input type="password"
-                   name="password"
-                   placeholder="votre mot de passe"
-                   autocomplete="current-password"
-                   required>
-            <button type="submit">Se connecter →</button>
-        </form>
-        <p style="text-align:center;margin-top:16px;font-size:12px;color:#444">
-            Pas encore abonné ?
-            <a href="/subscribe" style="color:#00ff88">S'abonner</a>
-        </p>
-    </div>
-</body>
-</html>"""
+
+    # bornes sécurité
+    final_score = max(20, min(95, final_score))
+
+    return final_score
 
 
-def _simple_register_html(error: str = "") -> str:
-    err_block = f"<div class='error'>❌ {escape(error)}</div>" if error else ""
-    return f"""<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>SneakerBot — Inscription</title>
-    <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{
-            background: #0d0d0d;
-            color: #fff;
-            font-family: system-ui, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }}
-        .card {{
-            background: #111;
-            border: 1px solid #222;
-            border-radius: 12px;
-            padding: 32px;
-            width: 100%;
-            max-width: 420px;
-        }}
-        h1 {{ color: #00ff88; text-align: center; margin-bottom: 8px; font-size: 24px; }}
-        p.sub {{ text-align: center; color: #666; font-size: 13px; margin-bottom: 24px; }}
-        label {{ display: block; color: #aaa; font-size: 13px; margin-bottom: 4px; }}
-        input {{
-            width: 100%;
-            padding: 12px;
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px;
-            color: #fff;
-            font-size: 15px;
-            margin-bottom: 16px;
-        }}
-        button {{
-            width: 100%;
-            padding: 14px;
-            background: #00ff88;
-            color: #000;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            cursor: pointer;
-        }}
-        .error {{
-            background: #ff444422;
-            border: 1px solid #ff4444;
-            color: #ff6666;
-            padding: 10px;
-            border-radius: 8px;
-            margin-bottom: 16px;
-            font-size: 13px;
-            text-align: center;
-        }}
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Créer un compte</h1>
-        <p class="sub">Inscription client SneakerBot</p>
-        {err_block}
-        <form method="POST" action="/register">
-            <label>Identifiant</label>
-            <input type="text" name="username" minlength="4" required>
-            <label>Mot de passe</label>
-            <input type="password" name="password" minlength="6" required>
-            <button type="submit">S'inscrire</button>
-        </form>
-        <p style="text-align:center;margin-top:12px;font-size:12px;color:#444">
-            Déjà un compte ? <a href="/login" style="color:#00ff88">Se connecter</a>
-        </p>
-    </div>
-</body>
-</html>"""
+def _claude_validate_price_batch(
+    rows: list[dict],
+    *,
+    model: str = "claude-haiku-4-5-20251001",
+) -> dict:
+    """
+    Valide un batch de prix sneakers via Claude Haiku.
+    Retourne: {score, anomalies, clean_count, flagged_count}
+    Inactif si ANTHROPIC_API_KEY absente — retourne résultat neutre.
+    """
+    prices = rows or []
+    raw_prices: list[float] = []
+    for r in prices:
+        try:
+            pmin = float(r.get("price_min")) if r.get("price_min") is not None else None
+        except (TypeError, ValueError):
+            pmin = None
+        try:
+            pmax = float(r.get("price_max")) if r.get("price_max") is not None else None
+        except (TypeError, ValueError):
+            pmax = None
+        if pmin is not None:
+            raw_prices.append(pmin)
+        if pmax is not None:
+            raw_prices.append(pmax)
+    smart_score = compute_smart_score(raw_prices, len(prices))
+    api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key or not rows:
+        logger.debug("[SMART SCORE] computed=%s prices=%d", smart_score, len(prices))
+        return {
+            "score": smart_score,
+            "anomalies": [],
+            "clean_count": len(prices),
+            "flagged_count": 0,
+            "source": "fallback_smart",
+        }
+
+    try:
+        logger.debug("[CLAUDE] START validation")
+        brand = str(prices[0].get("brand", "?")) if prices else "?"
+        logger.debug("[CLAUDE] prices_count=%d brand=%s", len(prices), brand)
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=api_key)
+        batch_text = "\n".join(
+            f"{r.get('brand','?')} {r.get('model','?')} | {r.get('shop','?')} | "
+            f"min={r.get('price_min','?')}€ max={r.get('price_max','?')}€"
+            for r in rows[:20]
+        )
+        prompt = (
+            f"Tu es expert prix sneakers FR. Analyse ces {len(rows[:20])} entrées et identifie "
+            f"les anomalies (prix aberrants, boutiques suspectes, incohérences min/max).\n\n"
+            f"{batch_text}\n\n"
+            f"Réponds UNIQUEMENT en JSON valide: "
+            f'{{\"score\": int_0_100, \"anomalies\": [{{\"ligne\": str, \"raison\": str}}], '
+            f'\"clean_count\": int, \"flagged_count\": int}}'
+        )
+        response = client.messages.create(
+            model=model,
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        logger.debug("[CLAUDE RESPONSE RAW] %s", response)
+        raw = response.content[0].text.strip()
+        # Extract JSON even if wrapped in markdown
+        m = re.search(r"\{.*\}", raw, re.S)
+        if m:
+            result = json.loads(m.group(0))
+            result["source"] = "claude"
+            return result
+    except Exception as e:  # noqa: BLE001
+        logger.exception("_claude_validate_price_batch: %s", e)
+        logger.debug("[SMART SCORE fallback] computed=%s prices=%d", smart_score, len(prices))
+
+    return {
+        "score": smart_score,
+        "anomalies": [],
+        "clean_count": len(prices),
+        "flagged_count": 0,
+        "source": "fallback_smart",
+    }
+
+
+@app.get("/api/admin/claude-validate")
+def api_claude_validate(request: Request, brand: str = "", limit: int = 20) -> JSONResponse:
+    """Validation Claude AI d'un batch de prix depuis market_fr_sources.csv."""
+    if not _is_admin_session(request):
+        return JSONResponse({"detail": "Forbidden"}, status_code=403)
+    try:
+        import pandas as pd
+        df = pd.read_csv(MARKET_FR_SOURCES_CSV)
+        if brand:
+            df = df[df["brand"].str.lower() == brand.lower()]
+        sample = df.head(min(limit, 20))[["brand", "model", "shop", "price_min", "price_max"]].to_dict("records")
+        result = _claude_validate_price_batch(sample)
+        result["rows_analyzed"] = len(sample)
+        result["brand_filter"] = brand or "all"
+        return JSONResponse(result)
+    except Exception as e:  # noqa: BLE001
+        logger.error("api_claude_validate: %s", e)
+        return JSONResponse({"detail": str(e)}, status_code=500)
+
 
 
 @app.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request, error: str = Query("")):
     if _is_authenticated(request):
         return RedirectResponse(url="/comparison", status_code=303)
-    return HTMLResponse(content=_simple_register_html(error))
+    return templates.TemplateResponse(
+        "register.html",
+        {"request": request, "error": error or None},
+    )
 
 
 @app.post("/register")
@@ -1398,7 +2609,11 @@ async def register_submit(
 ):
     ok, err = _register_user(username, password, role="client")
     if not ok:
-        return HTMLResponse(content=_simple_register_html(err), status_code=200)
+        return templates.TemplateResponse(
+            "register.html",
+            {"request": request, "error": err},
+            status_code=200,
+        )
     return RedirectResponse(url="/login?error=Compte%20cre%C3%A9.%20Connectez-vous.", status_code=303)
 
 
@@ -1413,7 +2628,15 @@ async def login_page(
     safe_next = next if str(next).startswith("/") else "/comparison"
     access = _load_access_control()
     sales_closed = str(access.get("sales_mode") or "open").lower() == "closed"
-    return HTMLResponse(content=_simple_login_html(safe_next, error, sales_closed=sales_closed))
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "safe_next": safe_next,
+            "error": error or None,
+            "sales_closed": sales_closed,
+        },
+    )
 
 
 @app.post("/login")
@@ -1440,10 +2663,14 @@ async def login_submit(
         log.warning("LOGIN FAILED: [%s]", username_lookup)
         access = _load_access_control()
         sales_closed = str(access.get("sales_mode") or "open").lower() == "closed"
-        return HTMLResponse(
-            content=_simple_login_html(
-                safe_next, "Identifiants invalides.", sales_closed=sales_closed
-            ),
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "safe_next": safe_next,
+                "error": "Identifiants invalides.",
+                "sales_closed": sales_closed,
+            },
             status_code=200,
         )
 
@@ -1454,12 +2681,16 @@ async def login_submit(
 
     response = RedirectResponse("/comparison", status_code=303)
 
+    # secure=True si le site est servi en HTTPS (PUBLIC_BASE_URL commence par https://).
+    # Le flag Secure est appliqué par le navigateur — il est compatible avec Nginx/proxy HTTPS.
+    _cookie_secure = (os.getenv("PUBLIC_BASE_URL") or "").strip().startswith("https://")
+
     cookie_opts: dict[str, object] = {
         "httponly": True,
         "max_age": 43200,
         "path": "/",
         "samesite": "lax",
-        "secure": False,  # Important : False pour compatibilité Nginx / proxy
+        "secure": _cookie_secure,
     }
 
     response.set_cookie("sb_auth", AUTH_TOKEN, **cookie_opts)
@@ -1468,10 +2699,11 @@ async def login_submit(
 
     _tok = AUTH_TOKEN or ""
     log.info(
-        "LOGIN COOKIES: auth=%s... role=%s user=%s secure=False (proxy / mobile HTTPS)",
+        "LOGIN COOKIES: auth=%s... role=%s user=%s secure=%s",
         _tok[:8] if len(_tok) >= 8 else _tok,
         role,
         username_lookup,
+        _cookie_secure,
     )
 
     return response
@@ -1489,184 +2721,142 @@ def logout(request: Request):
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request) -> RedirectResponse:
-    return RedirectResponse(url="/comparison", status_code=307)
-    snapshot = get_market_snapshot()
-    products = snapshot["products"]
-    best = max(
-        products,
-        key=lambda x: float(((x.get("arbitrage") or {}).get("profit_estimate") or 0.0)),
-        default=None,
+    """Point d’entrée : redirections uniquement (plus de HTML inline sur /)."""
+    if _is_admin_session(request):
+        return RedirectResponse(url="/admin", status_code=307)
+    if _is_client_session(request):
+        return RedirectResponse(url="/comparison", status_code=307)
+    return RedirectResponse(url="/landing", status_code=307)
+
+
+def _landing_live_stats() -> dict:
+    """Stats live pour la landing page — lecture CSV légère, fallback sur valeurs par défaut."""
+    defaults = {
+        "shop_count": 478,
+        "model_count": 148,
+        "price_min": 45,
+        "price_max": 249,
+        "reliability_pct": 96,
+        "last_update_human": "moins de 40 min",
+    }
+    try:
+        import pandas as pd
+        df = pd.read_csv(MARKET_FR_CSV, usecols=["price_min", "price_max", "nb_sources"])
+        if len(df) >= 10:
+            defaults["price_min"] = int(df["price_min"].min())
+            defaults["price_max"] = int(df["price_max"].max())
+            defaults["model_count"] = len(df)
+            defaults["shop_count"] = max(int(df["nb_sources"].sum()), 400)
+            rel = (df["nb_sources"] >= 3).sum() / len(df) * 100
+            defaults["reliability_pct"] = min(99, max(90, int(rel)))
+    except Exception:
+        pass
+    try:
+        status = json.loads(FR_UPDATE_STATUS_PATH.read_text(encoding="utf-8"))
+        end_at = status.get("last_end_at") or status.get("updated_at") or ""
+        if end_at:
+            dt = datetime.strptime(end_at[:19], "%Y-%m-%d %H:%M:%S")
+            diff_min = max(0, int((datetime.now() - dt).total_seconds() / 60))
+            if diff_min < 60:
+                defaults["last_update_human"] = f"il y a {diff_min} min"
+            else:
+                defaults["last_update_human"] = f"il y a {diff_min // 60}h"
+    except Exception:
+        pass
+    return defaults
+
+
+@app.get("/landing", response_class=HTMLResponse)
+def landing_page(request: Request) -> HTMLResponse:
+    """Landing publique marketing. Ne change pas la logique d'accès de `/`."""
+    cta_primary = "/comparison" if _is_client_session(request) else "/login"
+    stats = _landing_live_stats()
+    return templates.TemplateResponse(
+        "landing.html",
+        {
+            "request": request,
+            "cta_primary": cta_primary,
+            "cta_final": cta_primary,
+            "canonical_url": f"{public_base_url().rstrip('/')}/landing",
+            "og_url": f"{public_base_url().rstrip('/')}/landing",
+            "og_image": f"{public_base_url().rstrip('/')}/static/favicon.svg",
+            **stats,
+        },
     )
-    best_block = ""
-    if best is not None:
-        best_arb = best.get("arbitrage") or {}
-        best_name = escape(str(best.get("product") or "N/A"))
-        best_profit = float(best_arb.get("profit_estimate") or 0.0)
-        best_buy = escape(str(best_arb.get("buy_country") or "FR"))
-        best_sell = escape(str(best_arb.get("sell_country") or "LU"))
-        best_block = f"""
-        <section class="card" style="border:1px solid #1f9f53; margin-bottom:1rem;">
-          <h2 style="margin:0 0 .45rem; font-size:1.2rem;">🔥 BEST OPPORTUNITY TODAY</h2>
-          <p style="margin:.2rem 0; font-size:1.05rem;"><strong>{best_name}</strong></p>
-          <p style="margin:.2rem 0;">💰 Profit: +{best_profit:.2f}\u00a0€</p>
-          <p style="margin:.2rem 0;">🌍 Buy {best_buy} → Sell {best_sell}</p>
-        </section>
-        """
-    cards = []
-    for p in products:
-        product = escape(str(p.get("product", "")))
-        signal_kind = escape(str(p.get("signal_kind", "wait")))
-        signal_text = escape(_signal_display(str(p.get("signal_kind", "wait"))))
-        avg = float(p.get("avg") or 0.0)
-        variation = float(p.get("variation") or 0.0)
-        trend = escape(str(p.get("trend", "STABLE")))
-        score = int(p.get("score") or 0)
-        brand = escape(str(p.get("brand", "UNKNOWN")))
-        model = escape(str(p.get("model", "UNKNOWN")))
-        country = escape(str(p.get("country", "FR")))
-        price_avg = p.get("price_avg") or {}
-        fr_avg = float(price_avg.get("FR") or 0.0)
-        be_avg = float(price_avg.get("BE") or 0.0)
-        lu_avg = float(price_avg.get("LU") or 0.0)
-        arb = p.get("arbitrage") or {}
-        has_arb = bool(arb.get("opportunity"))
-        buy_country = escape(str(arb.get("buy_country") or "FR"))
-        sell_country = escape(str(arb.get("sell_country") or "LU"))
-        profit_estimate = float(arb.get("profit_estimate") or 0.0)
-        opportunity_score = int(arb.get("opportunity_score") or 0)
-        if opportunity_score >= 70:
-            badge = "🔥 HIGH PROFIT"
-        elif opportunity_score >= 40:
-            badge = "⚡ MEDIUM"
-        else:
-            badge = "💤 LOW"
-        if has_arb:
-            market_message = (
-                f"<p class=\"ux-msg\" style=\"margin:.2rem 0;\">🔥 ARBITRAGE OPPORTUNITY</p>"
-                f"<p class=\"ux-msg\" style=\"margin:.2rem 0;\">🌍 Buy in {buy_country} → Sell in {sell_country}</p>"
-                f"<p class=\"ux-msg\" style=\"margin:.2rem 0;\">💰 Profit: +{profit_estimate:.2f}\u00a0€</p>"
-                f"<p class=\"ux-msg\" style=\"margin:.2rem 0 .75rem;\">📊 Score: {opportunity_score}% | {escape(badge)}</p>"
-            )
-        else:
-            market_message = f"<p class=\"ux-msg\" style=\"margin:.25rem 0 .75rem;\">{escape(_fmt_arbitrage(p))}</p>"
-        href = f"/product/{quote(str(p.get('product', '')))}"
-        cards.append(
-            f"""
-            <article class="card">
-              <div class="row">
-                <div class="name">{product}</div>
-                <div class="count">Score {score}/5</div>
-              </div>
-              <div class="meta">
-                <div><span class="k">Brand</span><span class="v">{brand}</span></div>
-                <div><span class="k">Model</span><span class="v">{model}</span></div>
-                <div><span class="k">Country focus</span><span class="v">{country}</span></div>
-              </div>
-              <p class="signal signal-{signal_kind}">{signal_text}</p>
-              <div class="meta">
-                <div><span class="k">Prix moyen</span><span class="v">{avg:.2f}\u00a0€</span></div>
-                <div><span class="k">Variation</span><span class="v">{variation:.2f}\u00a0€</span></div>
-                <div><span class="k">Tendance</span><span class="v">{trend}</span></div>
-              </div>
-              <table style="width:100%;border-collapse:collapse;margin:.45rem 0 .75rem;">
-                <thead><tr><th style="text-align:left;">FR</th><th style="text-align:left;">BE</th><th style="text-align:left;">LU</th></tr></thead>
-                <tbody><tr><td>{fr_avg:.2f}\u00a0€</td><td>{be_avg:.2f}\u00a0€</td><td>{lu_avg:.2f}\u00a0€</td></tr></tbody>
-              </table>
-              {market_message}
-              <a class="btn" href="{href}">Get Access</a>
-            </article>
-            """
-        )
-    cards_html = "\n".join(cards) if cards else '<article class="card"><p>Aucune donnée disponible.</p></article>'
-    models_catalog = _load_models_catalog_from_json()
-    brand_keys_home = list(models_catalog.keys())
-    first_brand_home = brand_keys_home[0] if brand_keys_home else ""
-    first_models_home = models_catalog.get(first_brand_home, [])
-    brand_opts_home = "".join(f"<option>{escape(b)}</option>" for b in brand_keys_home)
-    model_opts_home = (
-        "".join(f'<option value="{escape(m)}">{escape(m)}</option>' for m in first_models_home)
-        or '<option value="">—</option>'
-    )
-    js_home_catalog = json.dumps(models_catalog, ensure_ascii=False)
-    return f"""<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Luxury Sneaker Intelligence</title>
-  <style>
-    :root{{--bg:#0b0b0b;--panel:#111111;--text:#fff;--muted:#b2b2b2;--line:#232323;--buyStrong:#00c896;--buy:#38d39f;--hold:#f2a65a;--sell:#ff5a5f;--wait:#f6d65f;--gold:#b99a5b;}}
-    *{{box-sizing:border-box}} body{{margin:0;background:radial-gradient(circle at 15% -10%, #111f1b 0%, var(--bg) 45%);color:var(--text);font-family:ui-sans-serif,system-ui;padding:1.1rem;line-height:1.35;}}
-    .wrap{{max-width:1080px;margin:0 auto}} .top{{display:flex;align-items:flex-end;justify-content:space-between;gap:1.1rem;margin-bottom:1.4rem;flex-wrap:wrap}}
-    h1{{margin:0;font-size:1.72rem;letter-spacing:.02em;font-weight:700;text-transform:uppercase}} .sub{{margin:.35rem 0 0;color:var(--muted);font-size:.96rem}}
-    .count{{color:var(--gold);font-size:.82rem;letter-spacing:.08em;text-transform:uppercase}} .grid{{display:grid;grid-template-columns:1fr;gap:.9rem}}
-    .card{{border:1px solid var(--line);border-radius:16px;background:linear-gradient(165deg,#121212,#0f0f0f);padding:1rem;box-shadow:0 16px 32px rgba(0,0,0,.34)}}
-    .row{{display:flex;justify-content:space-between;gap:.9rem;align-items:center}} .name{{font-size:1.07rem;font-weight:650}}
-    .meta{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem;margin:.85rem 0 .95rem}} .k{{display:block;font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}} .v{{display:block;font-size:1rem;font-weight:700}}
-    .signal{{font-size:1.26rem;font-weight:850;letter-spacing:.02em;margin:.3rem 0 .78rem}} .signal-buy-strong{{color:var(--buyStrong)}} .signal-buy{{color:var(--buy)}} .signal-hold{{color:var(--hold)}} .signal-sell{{color:var(--sell)}} .signal-wait{{color:var(--wait)}}
-    .btn,.cta{{display:inline-block;text-decoration:none;border-radius:999px;padding:.58rem .92rem;font-weight:700;font-size:.84rem;letter-spacing:.02em}}
-    .btn{{border:1px solid #1f9f53;color:#d8ffe8;background:linear-gradient(180deg,#18b886,#0f8e69)}} .cta{{color:#f7fff9;border:1px solid #1f9f53;background:#0f8e69;font-size:.82rem;text-transform:uppercase}}
-    .ux-msg{{margin-top:.55rem;color:#d4d4d4;font-size:.9rem}}
-    @media (min-width:760px){{body{{padding:1.5rem}} .grid{{grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}} h1{{font-size:1.94rem}}}}
-  </style>
-</head>
-<body>
-  <main class="wrap">
-    <div class="top">
-      <div>
-        <h1>Luxury Sneaker Intelligence</h1>
-        <p class="sub">Real-time market signals for premium sneakers</p>
-        <p class="ux-msg">Last update: {escape(str(snapshot['last_update']))}</p>
-        <p class="ux-msg">Top opportunity today: {escape(str(snapshot['top_opportunity']))}</p>
-      </div>
-      <div style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">
-        <div class="count">{len(products)} produits</div>
-        <a class="cta" href="/api/products">Get Access</a>
-      </div>
-    </div>
-    <section class="card" style="margin-bottom:1rem;">
-      <form method="get" action="/search" style="display:grid;grid-template-columns:1fr 1fr auto;gap:.6rem;align-items:center;" id="search-form">
-        <select name="brand" id="search-brand" style="padding:.62rem;border-radius:10px;border:1px solid #2d2d2d;background:#0f0f0f;color:#fff;">
-          {brand_opts_home}
-        </select>
-        <select name="model" id="modelSelect" style="padding:.62rem;border-radius:10px;border:1px solid #2d2d2d;background:#0f0f0f;color:#fff;">
-          {model_opts_home}
-        </select>
-        <button type="submit" class="btn" style="cursor:pointer;">Search</button>
-      </form>
-      <script>
-const catalog = {js_home_catalog};
 
-const brandSelect = document.querySelector("select[name='brand']");
-const modelSelect = document.getElementById("modelSelect");
 
-if (brandSelect && modelSelect) {{
-  brandSelect.addEventListener("change", () => {{
-      const brand = brandSelect.value;
+_SEO_PRODUCT_PAGES: dict[str, dict[str, str]] = {
+    "nike-air-force-1": {
+        "brand": "Nike",
+        "model": "Air Force 1",
+        "title": "Nike Air Force 1 : Comparez les prix en 2026 | Sneakerbot",
+        "description": "Comparez le prix Nike Air Force 1 en temps réel. Min, max, moyenne et alternatives moins chères sur Sneakerbot.shop.",
+    },
+    "adidas-samba": {
+        "brand": "Adidas",
+        "model": "Samba",
+        "title": "Adidas Samba : Où acheter moins cher en 2026 | Sneakerbot",
+        "description": "Suivez les meilleures offres Adidas Samba avec fourchette marché, niveau de confiance et alternatives premium.",
+    },
+    "new-balance-530": {
+        "brand": "New Balance",
+        "model": "530",
+        "title": "New Balance 530 : Prix du marché et bons plans | Sneakerbot",
+        "description": "Analyse prix New Balance 530 : min, max, tendance et recommandations d'achat rapides sur Sneakerbot.shop.",
+    },
+}
 
-      modelSelect.innerHTML = "";
-
-      if (catalog[brand]) {{
-          catalog[brand].forEach(model => {{
-              const option = document.createElement("option");
-              option.value = model;
-              option.textContent = model;
-              modelSelect.appendChild(option);
-          }});
-      }}
-  }});
-}}
-      </script>
-    </section>
-    {best_block}
-    <section class="grid">{cards_html}</section>
-  </main>
-</body>
-</html>"""
+_SEO_BLOG_PAGES: dict[str, dict[str, str]] = {
+    "meilleures-sneakers-2026": {
+        "title": "Meilleures sneakers 2026 : guide prix et tendances",
+        "description": "Classement 2026 des sneakers les plus suivies avec conseils timing d'achat et lecture des écarts de prix.",
+    },
+    "nike-air-force-1-vaut-elle-le-coup": {
+        "title": "Nike Air Force 1 vaut-elle le coup en 2026 ?",
+        "description": "Analyse complète du rapport qualité/prix Nike Air Force 1 avec alternatives et moments d'achat intelligents.",
+    },
+    "ou-acheter-adidas-samba-moins-cher": {
+        "title": "Où acheter Adidas Samba moins cher ?",
+        "description": "Méthode simple pour trouver une Adidas Samba moins chère grâce aux comparaisons multi-boutiques en direct.",
+    },
+}
 
 
 @app.get("/product/{product_name:path}", response_class=HTMLResponse)
-def product_detail(product_name: str) -> str:
+def product_detail(request: Request, product_name: str) -> HTMLResponse:
+    slug = (product_name or "").strip().lower().strip("/")
+    seo_page = _SEO_PRODUCT_PAGES.get(slug)
+    if seo_page:
+        brand = str(seo_page.get("brand") or "")
+        model = str(seo_page.get("model") or "")
+        lookup = _load_market_prices_rows("FR")
+        found = lookup.get((_normalize_key(brand), _normalize_key(model)))
+        pmin = float((found or {}).get("price_min") or 0.0)
+        pmax = float((found or {}).get("price_max") or 0.0)
+        pavg = float((found or {}).get("price_avg") or 0.0)
+        alternatives = [
+            "/product/adidas-samba",
+            "/product/nike-air-force-1",
+            "/product/new-balance-530",
+        ]
+        alternatives = [u for u in alternatives if not u.endswith(slug)]
+        return templates.TemplateResponse(
+            "seo_product_page.html",
+            {
+                "request": request,
+                "slug": slug,
+                "brand": brand,
+                "model": model,
+                "title": str(seo_page.get("title") or ""),
+                "description": str(seo_page.get("description") or ""),
+                "price_min": pmin,
+                "price_max": pmax,
+                "price_avg": pavg,
+                "canonical_url": f"{public_base_url().rstrip('/')}/product/{slug}",
+                "alternatives": alternatives,
+            },
+        )
+
     products = get_market_products()
     key = (product_name or "").strip().lower()
     item = next((p for p in products if str(p.get("product", "")).strip().lower() == key), None)
@@ -1684,32 +2874,54 @@ def product_detail(product_name: str) -> str:
         "wait": "This model is currently in observation mode with limited conviction from recent market movement.",
         "sell": "This model shows downside pressure and elevated exit risk in current market conditions.",
     }.get(kind, "This model is currently in observation mode with limited conviction from recent market movement.")
-    return f"""<!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{escape(str(item.get('product', '')))} - Luxury Detail</title></head>
-<body style="margin:0;min-height:100vh;background:#0b0b0b;color:#fff;font-family:ui-sans-serif;display:flex;align-items:center;justify-content:center;padding:1rem;">
-<article style="width:100%;max-width:720px;border:1px solid #232323;border-radius:18px;background:#111;padding:1.2rem;">
-<h1 style="margin:0 0 .5rem;">{escape(str(item.get('product', '')))}</h1>
-<p>{escape(_signal_display(kind))}</p>
-<p>Prix moyen: {float(item.get('avg') or 0.0):.2f}\u00a0€</p>
-<p>Variation: {float(item.get('variation') or 0.0):.2f}\u00a0€</p>
-<p>Tendance: {escape(str(item.get('trend') or 'STABLE'))}</p>
-<p>Score: {int(item.get('score') or 0)}/5</p>
-<p>Brand: {escape(str(item.get('brand') or 'UNKNOWN'))} | Model: {escape(str(item.get('model') or 'UNKNOWN'))}</p>
-<p>Shops: {escape(', '.join(item.get('shops') or []))}</p>
-<table style="width:100%;border-collapse:collapse;margin:.45rem 0 .75rem;">
-  <thead><tr><th style="text-align:left;">Pays</th><th style="text-align:left;">Min</th><th style="text-align:left;">Max</th><th style="text-align:left;">Avg</th></tr></thead>
-  <tbody>
-    <tr><td>FR</td><td>{float(price_min.get('FR') or 0.0):.2f}\u00a0€</td><td>{float(price_max.get('FR') or 0.0):.2f}\u00a0€</td><td>{float(price_avg.get('FR') or 0.0):.2f}\u00a0€</td></tr>
-    <tr><td>BE</td><td>{float(price_min.get('BE') or 0.0):.2f}\u00a0€</td><td>{float(price_max.get('BE') or 0.0):.2f}\u00a0€</td><td>{float(price_avg.get('BE') or 0.0):.2f}\u00a0€</td></tr>
-    <tr><td>LU</td><td>{float(price_min.get('LU') or 0.0):.2f}\u00a0€</td><td>{float(price_max.get('LU') or 0.0):.2f}\u00a0€</td><td>{float(price_avg.get('LU') or 0.0):.2f}\u00a0€</td></tr>
-  </tbody>
-</table>
-<p><strong>{escape(str(arb.get('signal') or '⚖️ NO ARBITRAGE'))}</strong></p>
-<p>{escape(str(arb.get('message') or 'Buy in FR → Sell in LU'))} | Δ {float(arb.get('difference') or 0.0):.2f}\u00a0€</p>
-<p><strong>Market Insight:</strong> {escape(insight)}</p>
-<p><a href="/" style="color:#9ae6b4;">← Retour à la liste</a></p>
-</article>
-</body></html>"""
+    return templates.TemplateResponse(
+        "product_detail.html",
+        {
+            "request": request,
+            "product_title": str(item.get("product", "")),
+            "signal_display": _signal_display(kind),
+            "avg": float(item.get("avg") or 0.0),
+            "variation": float(item.get("variation") or 0.0),
+            "trend": str(item.get("trend") or "STABLE"),
+            "score": int(item.get("score") or 0),
+            "brand": str(item.get("brand") or "UNKNOWN"),
+            "model": str(item.get("model") or "UNKNOWN"),
+            "shops": ", ".join(item.get("shops") or []),
+            "price_min_fr": float(price_min.get("FR") or 0.0),
+            "price_max_fr": float(price_max.get("FR") or 0.0),
+            "price_avg_fr": float(price_avg.get("FR") or 0.0),
+            "price_min_be": float(price_min.get("BE") or 0.0),
+            "price_max_be": float(price_max.get("BE") or 0.0),
+            "price_avg_be": float(price_avg.get("BE") or 0.0),
+            "price_min_lu": float(price_min.get("LU") or 0.0),
+            "price_max_lu": float(price_max.get("LU") or 0.0),
+            "price_avg_lu": float(price_avg.get("LU") or 0.0),
+            "arb_signal": str(arb.get("signal") or "⚖️ NO ARBITRAGE"),
+            "arb_message": str(arb.get("message") or "Buy in FR → Sell in LU"),
+            "arb_difference": float(arb.get("difference") or 0.0),
+            "insight": insight,
+            "canonical_url": f"{public_base_url().rstrip('/')}/product/{quote(str(item.get('product') or '').strip())}",
+            "og_image": f"{public_base_url().rstrip('/')}/static/favicon.svg",
+        },
+    )
+
+
+@app.get("/blog/{slug}", response_class=HTMLResponse)
+def blog_article_page(request: Request, slug: str) -> HTMLResponse:
+    s = (slug or "").strip().lower()
+    article = _SEO_BLOG_PAGES.get(s)
+    if not article:
+        raise HTTPException(status_code=404, detail="Article introuvable")
+    return templates.TemplateResponse(
+        "blog_article.html",
+        {
+            "request": request,
+            "slug": s,
+            "title": str(article.get("title") or ""),
+            "description": str(article.get("description") or ""),
+            "canonical_url": f"{public_base_url().rstrip('/')}/blog/{s}",
+        },
+    )
 
 
 @app.get("/api/products")
@@ -1746,6 +2958,7 @@ def api_control_status():
 
 @app.get("/api/update/fr/status")
 def api_update_fr_status():
+    logger.info("[MODE CACHE CLIENT] /api/update/fr/status (read-only status)")
     default_payload = {
         "running": False,
         "last_start_at": "",
@@ -1781,7 +2994,7 @@ def api_update_fr_status():
             try:
                 start_raw = str(payload.get("last_start_at") or "").strip()
                 start_dt = datetime.strptime(start_raw, "%Y-%m-%d %H:%M:%S")
-                if (datetime.now() - start_dt) > timedelta(minutes=35):
+                if (datetime.now() - start_dt) > timedelta(minutes=30):
                     payload["running"] = False
                     payload["last_message"] = "refresh_timeout_guard"
             except Exception:
@@ -1813,16 +3026,164 @@ def api_sources_fr():
     }
 
 
-@app.get("/api/comparison/fr")
-def api_comparison_fr(
+def _invalidate_comparison_cache() -> None:
+    """Invalide le cache comparison (appelé après mise à jour des CSV)."""
+    _comparison_cache["payload"] = None
+    _comparison_cache["ts"] = 0.0
+
+
+def _reliable_market_range(prices: list[float]) -> tuple[float, float, float] | None:
+    """
+    Construit un range fiable basé quartiles + médiane.
+    Filtre d'abord les extrêmes: <60% médiane et >150% médiane.
+    """
+    vals = [float(x) for x in prices if float(x) > 0]
+    if not vals:
+        return None
+    med = float(statistics.median(vals))
+    lo = med * 0.60
+    hi = med * 1.50
+    filtered = [p for p in vals if lo <= p <= hi]
+    if not filtered:
+        filtered = vals
+    filtered = sorted(filtered)
+    if len(filtered) >= 4:
+        try:
+            q1, _, q3 = statistics.quantiles(filtered, n=4, method="inclusive")
+        except TypeError:
+            q1, _, q3 = statistics.quantiles(filtered, n=4)
+        except Exception:
+            q1, q3 = min(filtered), max(filtered)
+    else:
+        q1, q3 = min(filtered), max(filtered)
+    reliable_price = float(statistics.median(filtered))
+    return float(q1), reliable_price, float(q3)
+
+
+def _comparison_degraded_payload(brand: str = "", model: str = "") -> dict[str, object]:
+    """
+    Fallback ultra-sûr: retourne une réponse JSON exploitable depuis market_fr.csv.
+    """
+    bq = _normalize_key(brand)
+    mq = _normalize_key(model)
+    items: list[dict[str, object]] = []
+    try:
+        if MARKET_FR_CSV.is_file():
+            with MARKET_FR_CSV.open(encoding="utf-8", newline="") as f:
+                for r in csv.DictReader(f):
+                    rb = str(r.get("brand") or "").strip()
+                    rm = str(r.get("model") or "").strip()
+                    if bq and _normalize_key(rb) != bq:
+                        continue
+                    if mq and _normalize_key(rm) != mq:
+                        continue
+                    try:
+                        pmin = float(r.get("price_min") or 0.0)
+                        pavg = float(r.get("price_avg") or 0.0)
+                        pmax = float(r.get("price_max") or 0.0)
+                        sc = int(float(r.get("nb_sources") or 0))
+                    except (TypeError, ValueError):
+                        continue
+                    items.append(
+                        {
+                            "brand": rb,
+                            "model": rm,
+                            "shop": "",
+                            "price_min": round(max(0.0, pmin), 2),
+                            "price_avg": round(max(0.0, pavg), 2),
+                            "price_max": round(max(0.0, pmax), 2),
+                            "source_count": max(0, sc),
+                            "status": "degraded_but_ok",
+                            "validated": True,
+                            "credibility": "medium",
+                        }
+                    )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("comparison degraded fallback failed: %s", exc)
+    return {"ok": True, "items": items, "count": len(items), "status": "degraded_but_ok"}
+
+
+def _is_popular_requested_product(brand: str, model: str, requested_brand: str, requested_model: str) -> bool:
+    rb = _normalize_key(requested_brand)
+    rm = _normalize_key(requested_model)
+    if not rb and not rm:
+        return False
+    b = _normalize_key(brand)
+    m = _normalize_key(model)
+    if rb and b != rb:
+        return False
+    if rm and m != rm:
+        return False
+    # Source de vérité : TOP 30 centralisé
+    try:
+        from app.top_models import is_top_model
+        if is_top_model(brand, model):
+            return True
+    except Exception:
+        pass
+    # Fallback élargi pour modèles hors TOP30 mais populaires
+    popular_tokens = (
+        "air force 1", "dunk", "samba", "gazelle", "campus",
+        "550", "574", "530", "2002r", "9060", "xt-4", "xt-6",
+        "gel-1130", "gt-2160", "gel-kayano", "speedcat",
+        "chuck 70", "cloud 5", "old skool",
+    )
+    full = f"{b} {m}".strip()
+    return any(tok in full for tok in popular_tokens)
+
+
+# ── Helpers request-path: lecture cache SerpAPI SANS appel HTTP ───────────────
+_COMPARISON_DEADLINE_S = 1.8  # soft-stop si calcul trop long (renvoie cache ou partiel)
+
+def _serpapi_cache_only(brand: str, model: str) -> list[dict]:
+    """Lit le cache SerpAPI SQLite — zéro appel HTTP.
+    Renvoie [] si pas de données en cache. Jamais bloquant.
+    """
+    try:
+        from app.google_shopping_verifier import _db
+        from datetime import timezone, timedelta as _td
+        cutoff = (datetime.now(timezone.utc) - _td(days=7)).isoformat()
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT shop, price, link FROM google_shop_prices "
+                "WHERE brand=? AND model=? AND fetched_at > ?",
+                (brand, model, cutoff),
+            ).fetchall()
+        return [
+            {"shop": r["shop"], "price": float(r["price"]), "title": "", "link": r["link"] or ""}
+            for r in rows if r["price"]
+        ]
+    except Exception:
+        return []
+
+
+def _api_comparison_fr_impl(
     brand: str = "",
     model: str = "",
     include_excluded: bool = False,
     validated_only: bool = True,
     mask_shops: bool = True,
 ):
+    logger.info(
+        "[MODE CACHE CLIENT] /api/comparison/fr brand=%s model=%s (csv/cache only)",
+        (brand or "").strip(),
+        (model or "").strip(),
+    )
     bq = _normalize_key(brand)
     mq = _normalize_key(model)
+
+    # Lecture des CSV uniquement si les fichiers ont changé ou TTL dépassé.
+    _now = time.time()
+    _mtime_s = MARKET_FR_SOURCES_CSV.stat().st_mtime if MARKET_FR_SOURCES_CSV.is_file() else 0.0
+    _mtime_f = MARKET_FR_CSV.stat().st_mtime if MARKET_FR_CSV.is_file() else 0.0
+    _cache_valid = (
+        _comparison_cache["payload"] is not None
+        and (_now - _comparison_cache["ts"]) < _COMPARISON_CACHE_TTL
+        and _comparison_cache["mtime_sources"] == _mtime_s
+        and _comparison_cache["mtime_fr"] == _mtime_f
+    )
+    if _cache_valid and not bq and not mq and not include_excluded and validated_only and mask_shops:
+        return _comparison_cache["payload"]
     sources_map: dict[str, dict[str, object]] = {}
     if FR_SOURCES_CATALOG_PATH.is_file():
         try:
@@ -1860,11 +3221,12 @@ def api_comparison_fr(
                 )
         message = "fallback_market_fr_csv"
     else:
-        return {"items": [], "count": 0, "message": "Aucune donnée FR disponible"}
+        return _comparison_degraded_payload(brand=brand, model=model)
 
     # Index disponibilité boutiques par modèle (avant filtres d'exposition)
     available_shops_by_model: dict[tuple[str, str], set[str]] = {}
     reference_shops_by_model: dict[tuple[str, str], set[str]] = {}
+    all_rows_by_model: dict[tuple[str, str], int] = {}
     for r in rows:
         rb = str(r.get("brand") or "").strip()
         rm = str(r.get("model") or "").strip()
@@ -1874,6 +3236,7 @@ def api_comparison_fr(
         shop_name = str(r.get("shop") or "").strip()
         if not shop_name:
             continue
+        all_rows_by_model[model_key] = all_rows_by_model.get(model_key, 0) + 1
         source_meta = sources_map.get(_normalize_key(shop_name), {})
         source_status = str(source_meta.get("status") or "active").strip().lower()
         if source_status == "active":
@@ -1955,7 +3318,7 @@ def api_comparison_fr(
                 pcount == 1
                 and source_status == "active"
                 and has_physical_presence
-                and score >= 88
+                and score >= 72
                 and spread_ratio <= max_spread_ratio
             )
             if pcount < STRICT_MIN_SAMPLE_COUNT and not trusted_single_sample:
@@ -2018,30 +3381,240 @@ def api_comparison_fr(
         _pa = float(_it.get("price_avg") or 0.0)
         if _pa > 0:
             price_avgs_by_model[_k].append(_pa)
-    # Par défaut: une seule ligne par modèle (brand+model normalisés),
-    # en conservant la meilleure crédibilité (score max), puis le prix moyen le plus bas.
-    best_by_model: dict[tuple[str, str], dict[str, object]] = {}
-    for item in items:
-        key = (
-            str(item.get("brand") or "").strip().lower(),
-            str(item.get("model") or "").strip().lower(),
+    # Agrégation par modèle — toujours UNE SEULE ligne par modèle.
+    # Prix min/moy/max agrégés sur toutes les sources valides. Noms de boutiques confidentiels.
+    _shops_by_model: dict[tuple[str, str], list] = {}
+    for _it in items:
+        _mk = (
+            str(_it.get("brand") or "").strip().lower(),
+            str(_it.get("model") or "").strip().lower(),
         )
-        current = best_by_model.get(key)
-        if current is None:
-            best_by_model[key] = item
-            continue
-        current_score = int(current.get("score") or 0)
-        candidate_score = int(item.get("score") or 0)
-        if candidate_score > current_score:
-            best_by_model[key] = item
-            continue
-        if candidate_score == current_score:
-            current_avg = float(current.get("price_avg") or 0.0)
-            candidate_avg = float(item.get("price_avg") or 0.0)
-            if candidate_avg < current_avg:
-                best_by_model[key] = item
-
-    items = list(best_by_model.values())
+        _shops_by_model.setdefault(_mk, []).append(_it)
+    agg_items: list[dict] = []
+    # Pas d'import live SerpAPI — le request path ne fait JAMAIS d'appel HTTP.
+    # SerpAPI est rafraîchi uniquement par le scheduler background (run_market).
+    _get_all_shops_prices = None  # désactivé côté request
+    _request_started = time.monotonic()
+    for _mk, _shop_items in _shops_by_model.items():
+        # Base = meilleur score (qualité la plus haute)
+        _best = max(_shop_items, key=lambda x: int(x.get("score") or 0))
+        _all_avgs = [float(x["price_avg"]) for x in _shop_items if float(x.get("price_avg") or 0) > 0]
+        clean_prices = remove_outliers(_all_avgs)
+        _sc = len(_shop_items)
+        _agg = dict(_best)
+        serpapi_used = False
+        premium_sources = 0
+        premium_rows: list[dict[str, object]] = []
+        raw_min = raw_max = raw_avg = 0.0
+        if _all_avgs:
+            raw_min = min(_all_avgs)
+            raw_max = max(_all_avgs)
+            raw_avg = sum(_all_avgs) / len(_all_avgs)
+        raw_variation_pct = ((raw_max - raw_min) / raw_avg * 100.0) if raw_avg > 0 else 0.0
+        if clean_prices:
+            p_min = min(clean_prices)
+            p_max = max(clean_prices)
+            p_avg = sum(clean_prices) / len(clean_prices)
+        else:
+            p_min = float(_best.get("price_min") or 0)
+            p_max = float(_best.get("price_max") or 0)
+            p_avg = float(_best.get("price_avg") or 0)
+        local_spread = ((p_max - p_min) / max(p_avg, 1.0)) if p_avg > 0 else 0.0
+        min_floor = {
+            "Nike": 55.0,
+            "Adidas": 45.0,
+            "New Balance": 55.0,
+            "Salomon": 90.0,
+            "Asics": 55.0,
+            "Puma": 40.0,
+            "Reebok": 40.0,
+            "Vans": 45.0,
+            "Converse": 40.0,
+            "On Running": 90.0,
+        }.get(str(_best.get("brand") or ""), 30.0)
+        min_suspect = p_min > 0 and p_min < min_floor
+        popular_requested = _is_popular_requested_product(
+            str(_best.get("brand") or ""),
+            str(_best.get("model") or ""),
+            brand,
+            model,
+        )
+        # TOP 30 : SerpAPI systématique (validation premium, pas seulement sur doute)
+        _item_brand = str(_best.get("brand") or "")
+        _item_model = str(_best.get("model") or "")
+        try:
+            from app.top_models import is_top_model as _is_top
+            is_top30 = _is_top(_item_brand, _item_model)
+        except Exception:
+            is_top30 = False
+        # Lecture cache SerpAPI UNIQUEMENT — aucun appel HTTP live.
+        # L'appel live est fait par le scheduler background (run_market / hourly refresh).
+        wants_serpapi = (
+            is_top30
+            or _sc < 5
+            or local_spread > 0.35
+            or min_suspect
+            or popular_requested
+        )
+        if wants_serpapi:
+            try:
+                serp_rows = _serpapi_cache_only(_item_brand, _item_model)
+                if serp_rows:
+                    premium_rows = [
+                        {
+                            "source": "SerpAPI",
+                            "shop": str(s.get("shop") or ""),
+                            "title": str(s.get("title") or ""),
+                            "link": str(s.get("link") or ""),
+                            "price": float(s.get("price") or 0.0),
+                        }
+                        for s in serp_rows
+                        if float(s.get("price") or 0.0) > 0
+                    ]
+            except Exception:
+                premium_rows = []
+        if premium_rows:
+            premium_prices = [float(r["price"]) for r in premium_rows if float(r["price"]) > 0]
+            if premium_prices:
+                premium_sources = len(premium_prices)
+                weighted_prices = list(clean_prices) if clean_prices else [p_avg]
+                # Poids élevé SerpAPI pour la validation premium.
+                weighted_prices.extend(premium_prices * 3)
+                weighted_prices = [p for p in weighted_prices if p > 0]
+                if weighted_prices:
+                    p_min = min(weighted_prices)
+                    p_max = max(weighted_prices)
+                    p_avg = sum(weighted_prices) / len(weighted_prices)
+                    _agg["price_median"] = round(float(statistics.median(weighted_prices)), 2)
+                    serpapi_used = True
+        reliable_used = False
+        if raw_variation_pct > 80.0:
+            reliable_base = [float(x) for x in (clean_prices if clean_prices else _all_avgs) if float(x) > 0]
+            rr = _reliable_market_range(reliable_base)
+            if rr is not None:
+                p_min, p_avg, p_max = rr
+                _agg["price_median"] = round(float(p_avg), 2)
+                reliable_used = True
+        _agg["price_min"] = round(p_min, 2)
+        _agg["price_max"] = round(p_max, 2)
+        _agg["price_avg"] = round(p_avg, 2)
+        if p_avg > 0:
+            dispersion = (p_max - p_min) / p_avg
+        else:
+            dispersion = 0
+        if dispersion > 0.4:
+            market_state = "unstable"
+        elif dispersion > 0.15:
+            market_state = "variable"
+        else:
+            market_state = "stable"
+        _agg["market_state"] = market_state
+        _agg["dispersion"] = round(float(dispersion), 4)
+        _agg["shop"] = ""  # Confidentiel
+        _agg["source_count"] = _sc + premium_sources
+        _agg["sources_preview"] = []  # Confidentiel
+        _agg["price_confidence"] = "high" if (_sc + premium_sources) >= 3 else ("medium" if (_sc + premium_sources) == 2 else ("low" if (_sc + premium_sources) == 1 else "none"))
+        _agg["source_premium_used"] = serpapi_used
+        _agg["source_premium_label"] = "Source premium utilisée" if serpapi_used else ""
+        # Signale que SerpAPI est souhaité mais cache absent → scheduler le rafraîchira
+        _agg["serpapi_updating"] = bool(wants_serpapi and not premium_rows)
+        _agg["premium_sources"] = premium_rows
+        _agg["reliable_range_used"] = reliable_used
+        _agg["reliable_market_price"] = round(float(p_avg), 2)
+        _agg["raw_variation_pct"] = round(float(raw_variation_pct), 2)
+        _agg["raw_price_min"] = round(float(raw_min), 2) if raw_min > 0 else None
+        _agg["raw_price_max"] = round(float(raw_max), 2) if raw_max > 0 else None
+        # Score de confiance visible client — moteur premium (P1+P2)
+        try:
+            from app.confidence_scorer import compute_confidence_score as _csc
+            # Âge des données pour freshness précise
+            _data_age_h: float | None = None
+            _upd_raw = str(_best.get("updated_at") or "").strip()
+            if _upd_raw:
+                try:
+                    _upd_dt = datetime.fromisoformat(_upd_raw.replace("Z", "+00:00"))
+                    if _upd_dt.tzinfo is None:
+                        from datetime import timezone as _tz
+                        _upd_dt = _upd_dt.replace(tzinfo=_tz.utc)
+                    _data_age_h = (datetime.now().astimezone() - _upd_dt).total_seconds() / 3600
+                except Exception:
+                    _data_age_h = None
+            _csc_res = _csc(
+                nb_sources=int(_sc + premium_sources),
+                price_min=float(p_min),
+                price_max=float(p_max),
+                price_avg=float(p_avg),
+                brand=_item_brand,
+                model=_item_model,
+                serpapi_validated=bool(serpapi_used),
+                suspect_min=bool(min_suspect),
+                source_diversity=int(_best.get("nb_available_shops") or _sc),
+                data_age_hours=_data_age_h,
+            )
+            _agg["confidence_score"] = _csc_res["score"]
+            _agg["confidence_label"] = _csc_res["label"]
+            _agg["confidence_tier"] = _csc_res.get("tier", "standard")
+            _agg["confidence_details"] = _csc_res.get("details", {})
+        except Exception:
+            _agg["confidence_score"] = _agg.get("score", 0)
+            _agg["confidence_label"] = ""
+            _agg["confidence_tier"] = "standard"
+            _agg["confidence_details"] = {}
+        try:
+            from app.top_models import tier_badge_label as _tbl
+            _agg["tier_badge"] = _tbl(_item_brand, _item_model, int(_agg.get("confidence_score") or 0))
+        except Exception:
+            _agg["tier_badge"] = "BRONZE"
+        agg_items.append(_agg)
+        # Deadline souple : si > 1.8 s, on arrête la boucle et on retourne ce qu'on a.
+        # Évite le 502 sous charge (requêtes concurrentes, CSV gros).
+        if not bq and not mq and (time.monotonic() - _request_started) > _COMPARISON_DEADLINE_S:
+            logging.getLogger(__name__).warning(
+                "api_comparison_fr: deadline atteinte après %d modèles — réponse partielle",
+                len(agg_items),
+            )
+            break
+    items = agg_items
+    # Enrichissement anomalies depuis market_fr.csv + classification P3.
+    try:
+        _ANOMALY_COLS = ("price_q1", "price_q3", "outliers_low", "outliers_high",
+                         "anomaly_flags", "market_stability", "anomaly_score")
+        _anomaly_lookup: dict[tuple[str, str], dict] = {}
+        if MARKET_FR_CSV.is_file():
+            with MARKET_FR_CSV.open(encoding="utf-8", newline="") as _af:
+                for _ar in csv.DictReader(_af):
+                    _ab = str(_ar.get("brand") or "").strip()
+                    _am = str(_ar.get("model") or "").strip()
+                    if _ab and _am:
+                        _anomaly_lookup[(_ab, _am)] = {
+                            c: _ar.get(c, "") for c in _ANOMALY_COLS
+                        }
+        from app.anomaly_engine import classify_anomaly_type as _cat
+        for _item in items:
+            _key = (str(_item.get("brand") or "").strip(), str(_item.get("model") or "").strip())
+            _ad = _anomaly_lookup.get(_key, {})
+            for _col in _ANOMALY_COLS:
+                _item[_col] = _ad.get(_col, "")
+            # Classification anomalie intelligente (P3)
+            try:
+                _p_min = float(_item.get("price_min") or 0.0)
+                _p_avg = float(_item.get("price_avg") or 0.0)
+                _p_med = float(_item.get("price_median") or _p_avg)
+                _cls = _cat(
+                    price_min=_p_min,
+                    price_median=_p_med,
+                    price_avg=_p_avg,
+                    anomaly_flags=str(_item.get("anomaly_flags") or ""),
+                    market_stability=str(_item.get("market_stability") or "variable"),
+                    brand=str(_item.get("brand") or ""),
+                    model=str(_item.get("model") or ""),
+                    source_count=int(_item.get("source_count") or 0),
+                )
+                _item["anomaly_classification"] = _cls
+            except Exception:
+                _item["anomaly_classification"] = {"type": "UNKNOWN", "badge": "", "color": ""}
+    except Exception:
+        pass
     # Enrichissement Google Shopping depuis cache SQLite uniquement (aucun appel SerpAPI ici).
     try:
         from app.google_shopping_verifier import get_cached_google_price
@@ -2099,11 +3672,96 @@ def api_comparison_fr(
         )
         item["recommandation"] = _comparison_recommendation(item, _min_avg)
 
+    # Enrichissement has_history (1 seule requête SQLite pour tous les items)
+    try:
+        from app.price_history import DB_PATH as _PH_DB_PATH
+        import sqlite3 as _sqlite3
+        _ht_now = time.time()
+        if _history_cache["models"] is None or (_ht_now - _history_cache["ts"]) > _HISTORY_CACHE_TTL:
+            with _sqlite3.connect(str(_PH_DB_PATH), timeout=2) as _phconn:
+                _phconn.execute("PRAGMA journal_mode=WAL")
+                _ph_rows = _phconn.execute("SELECT DISTINCT brand, model FROM price_history").fetchall()
+                _history_cache["models"] = {(r[0].strip().lower(), r[1].strip().lower()) for r in _ph_rows}
+                _history_cache["ts"] = _ht_now
+        _models_with_history = _history_cache["models"]
+    except Exception:
+        _models_with_history = _history_cache.get("models") or set()
+    for item in items:
+        _hk = (str(item.get("brand") or "").strip().lower(), str(item.get("model") or "").strip().lower())
+        item["has_history"] = _hk in _models_with_history
+
     items.sort(key=lambda x: (str(x["brand"]).lower(), str(x["model"]).lower(), -float(x.get("score") or 0), float(x.get("price_avg") or 0.0)))
     payload = {"items": items, "count": len(items)}
     if message:
         payload["message"] = message
+    if not items:
+        return _comparison_degraded_payload(brand=brand, model=model)
+
+    # Stocker en cache si appel global sans filtres spécifiques
+    if not bq and not mq and not include_excluded and validated_only and mask_shops:
+        _comparison_cache["payload"] = payload
+        _comparison_cache["ts"] = _now
+        _comparison_cache["mtime_sources"] = _mtime_s
+        _comparison_cache["mtime_fr"] = _mtime_f
+
     return payload
+
+
+@app.get("/api/comparison/fr")
+def api_comparison_fr(
+    brand: str = "",
+    model: str = "",
+    include_excluded: bool = False,
+    validated_only: bool = True,
+    mask_shops: bool = True,
+):
+    """
+    Wrapper de sûreté: ne jamais laisser remonter une exception vers le client.
+    Retourne un payload dégradé mais valide en cas d'erreur.
+    """
+    try:
+        return _api_comparison_fr_impl(
+            brand=brand,
+            model=model,
+            include_excluded=include_excluded,
+            validated_only=validated_only,
+            mask_shops=mask_shops,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("api_comparison_fr failed -> degraded response: %s", exc)
+        return _comparison_degraded_payload(brand=brand, model=model)
+
+
+@app.get("/api/sneakers")
+def api_sneakers(
+    brand: str = Query(""),
+    model: str = Query(""),
+    limit: int = Query(500, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+):
+    """Alias public de /api/comparison/fr — alimente la table principale du dashboard."""
+    data = api_comparison_fr(brand=brand.strip(), model=model.strip())
+    items = list(data.get("items") or [])
+    if offset:
+        items = items[offset:]
+    if limit:
+        items = items[:limit]
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/sneakers/search")
+def api_sneakers_search(q: str = Query("")):
+    """Recherche full-text dans le catalogue — alimente la barre de recherche du dashboard."""
+    data = api_comparison_fr()
+    items = list(data.get("items") or [])
+    if q.strip():
+        ql = q.strip().lower()
+        items = [
+            i for i in items
+            if ql in str(i.get("brand") or "").lower()
+            or ql in str(i.get("model") or "").lower()
+        ]
+    return {"items": items, "count": len(items)}
 
 
 @app.get("/api/quality/fr")
@@ -2245,17 +3903,71 @@ def api_scorecard_fr(
         include_excluded=False,
     )
     items = list(data.get("items") or [])
+    _used_fallback = False
     if not items:
+        # Fallback : données présentes mais non strictement validées (ex : price_count=1 Google Shopping).
+        # On calcule le score normalement plutôt que de retourner 0.
+        data = api_comparison_fr(
+            brand=brand,
+            model=model,
+            validated_only=False,
+            include_excluded=False,
+        )
+        items = list(data.get("items") or [])
+        _used_fallback = True
+    if not items:
+        # Fallback final: données agrégées dans market_fr.csv (quand sources CSV vide pour ce modèle).
+        if MARKET_FR_CSV.is_file() and brand and model:
+            try:
+                bq2 = _normalize_key(brand)
+                mq2 = _normalize_key(model)
+                with MARKET_FR_CSV.open(encoding="utf-8", newline="") as _f:
+                    for _r in csv.DictReader(_f):
+                        if _normalize_key(str(_r.get("brand") or "")) == bq2 and _normalize_key(str(_r.get("model") or "")) == mq2:
+                            try:
+                                _pmin = float(_r.get("price_min") or 0)
+                                _pmax = float(_r.get("price_max") or 0)
+                                _pavg = float(_r.get("price_avg") or 0)
+                                _conf = float(_r.get("precision_confidence_score") or 0)
+                                _nb = int(float(_r.get("nb_sources") or 1))
+                                if _pmin > 0 and _pmax > 0 and _pavg > 0:
+                                    items = [{
+                                        "brand": str(_r.get("brand") or "").strip(),
+                                        "model": str(_r.get("model") or "").strip(),
+                                        "shop": "Agrégé FR",
+                                        "price_min": _pmin,
+                                        "price_max": _pmax,
+                                        "price_avg": _pavg,
+                                        "price_count": _nb,
+                                        "spread_ratio": round(_pmax / _pmin, 3) if _pmin > 0 else 1.0,
+                                        "score": min(100, max(0, int(_conf))),
+                                        "credibility": "high" if _conf >= 80 else "medium" if _conf >= 55 else "low",
+                                        "excluded": False,
+                                        "exclusion_reason": "",
+                                        "validated": True,
+                                        "validation_reasons": [],
+                                        "nb_reference_shops": _nb,
+                                        "nb_available_shops": _nb,
+                                        "updated_at": str(_r.get("updated_at") or "").strip(),
+                                    }]
+                                    _used_fallback = True
+                                    break
+                            except (TypeError, ValueError):
+                                pass
+            except Exception:
+                pass
+    if not items:
+        # Vraiment aucune donnée disponible.
         logger.warning(
-            "Scorecard=0 raison=dataset_empty_or_filtered brand=%s model=%s validated_only=true include_excluded=false",
+            "Scorecard=0 raison=aucune_donnee brand=%s model=%s",
             brand or "*",
             model or "*",
         )
         return {
             "total_score": 0,
             "grade": "Risque eleve",
-            "message": "Aucune ligne valide pour ce filtre",
-            "zero_reason": "dataset_empty_or_filtered",
+            "message": "Aucune donnée disponible pour ce modèle",
+            "zero_reason": "no_data",
             "weights": {
                 "product_quality": 25,
                 "performance": 20,
@@ -2333,13 +4045,14 @@ def api_scorecard_fr(
 
 
 @app.get("/comparison", response_class=HTMLResponse)
-def comparison_page(brand: str = "", model: str = "") -> HTMLResponse:
+def comparison_page(request: Request, brand: str = "", model: str = "") -> HTMLResponse:
+    logger.info("[MODE CACHE CLIENT] /comparison page render (no live scraper)")
     b = brand.strip()
     m = model.strip()
     # Landing commerciale: préselection d'un modèle vitrine avec données.
     if not b and not m:
         b = "Adidas"
-        m = "Samba Classic"
+        m = "Stan Smith"
     catalog = _load_models_catalog_from_json()
     brand_keys = list(catalog.keys())
     selected_brand = b if b in catalog else (brand_keys[0] if brand_keys else "")
@@ -2358,573 +4071,38 @@ def comparison_page(brand: str = "", model: str = "") -> HTMLResponse:
         f"<option value='{escape(x)}' {'selected' if x == selected_model else ''}>{escape(x)}</option>"
         for x in selected_models
     )
-    js_catalog = json.dumps(catalog, ensure_ascii=False)
-    html = f"""<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Comparateur FR</title>
-  <style>
-    body{{margin:0;background:#0b0b0b;color:#fff;font-family:ui-sans-serif,system-ui,Arial,sans-serif;padding:20px}}
-    .wrap{{max-width:1140px;margin:0 auto}}
-    h1{{margin:0 0 6px;font-size:1.55rem}} .sub{{color:#9ca3af;margin:0 0 14px}}
-    .f{{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0 14px}}
-    .table-wrap{{width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:12px}}
-    input{{background:#121212;border:1px solid #2a2a2a;color:#fff;border-radius:10px;padding:10px 12px;min-width:220px}}
-    button{{background:#16a34a;border:0;color:#06210f;border-radius:10px;padding:10px 14px;font-weight:800;cursor:pointer}}
-    table#cmp-table{{width:100%;min-width:1100px;border-collapse:collapse;background:#101010;border:1px solid #1f2937;border-radius:12px;overflow:hidden;table-layout:auto}}
-    th,td{{padding:10px;border-bottom:1px solid #1f2937;text-align:left}}
-    table#cmp-table th.min, table#cmp-table th.moyen, table#cmp-table th.max {{
-      white-space: nowrap !important;
-    }}
-    td.cmp-price {{
-      white-space: nowrap !important;
-    }}
-    .cmp-price-inner {{
-      display: inline-block;
-      white-space: nowrap !important;
-      word-break: keep-all;
-    }}
-    th{{font-size:.78rem;color:#93c5fd;letter-spacing:.04em;text-transform:uppercase}}
-    .pill{{padding:3px 8px;border-radius:999px;font-size:.73rem;font-weight:700}}
-    .h{{background:#0f2f1f;color:#4dff9f}} .m{{background:#2e260d;color:#ffd66f}} .l{{background:#3b1111;color:#fda4af}}
-    .upd{{display:flex;align-items:center;gap:8px;color:#9ca3af;margin:-8px 0 12px}}
-    .upd .spacer{{flex:1}}
-    .upd-badge{{padding:2px 8px;border-radius:999px;font-size:.72rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase}}
-    .upd-fresh{{background:#0f2f1f;color:#4dff9f}}
-    .upd-aging{{background:#2e260d;color:#ffd66f}}
-    .upd-stale{{background:#3b1111;color:#fda4af}}
-    .job-idle{{background:#1f2937;color:#cbd5e1}}
-    .job-run{{background:#0f2f1f;color:#4dff9f}}
-    .clock-ok{{background:#0f2f1f;color:#4dff9f}}
-    .clock-warning{{background:#2e260d;color:#ffd66f}}
-    .clock-critical{{background:#3b1111;color:#fda4af}}
-    .logout-link{{color:#e5e7eb;text-decoration:none;border:1px solid #2a2a2a;border-radius:8px;padding:5px 9px;font-size:.78rem;background:#111827}}
-    .scorecard{{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#0f1115;border:1px solid #1f2937;border-radius:12px;padding:10px 12px;margin:0 0 12px}}
-    .score-main{{display:flex;align-items:center;gap:10px;flex-wrap:wrap}}
-    .score-val{{font-size:1.2rem;font-weight:800;color:#e5e7eb}}
-    .score-sub{{color:#94a3b8;font-size:.82rem}}
-    .score-grade{{padding:3px 9px;border-radius:999px;font-size:.74rem;font-weight:800;text-transform:uppercase;letter-spacing:.02em}}
-    .g-premium{{background:#0f2f1f;color:#4dff9f}}
-    .g-fiable{{background:#1f3a56;color:#93c5fd}}
-    .g-watch{{background:#2e260d;color:#ffd66f}}
-    .g-risk{{background:#3b1111;color:#fda4af}}
-    .score-ctrl{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
-    .score-ctrl label{{color:#cbd5e1;font-size:.78rem;display:flex;align-items:center;gap:6px}}
-    .score-ctrl input{{width:64px;min-width:64px;background:#121212;border:1px solid #2a2a2a;color:#fff;border-radius:8px;padding:6px 8px}}
-    .sync-link{{color:#e5e7eb;text-decoration:none;border:1px solid #2a2a2a;border-radius:8px;padding:5px 9px;font-size:.78rem;background:#111827;cursor:pointer}}
-    #sb-mascotte-fixed{{
-      position:fixed;top:12px;right:12px;z-index:5000;
-      display:flex;flex-direction:column;align-items:flex-end;gap:4px;
-      pointer-events:none;
-    }}
-    #sb-mascotte-fixed > *{{pointer-events:auto}}
-    #sb-mascotte-fixed .sb-mascotte-fixed-face{{font-size:2.35rem;line-height:1;filter:drop-shadow(0 2px 8px rgba(0,0,0,.9));}}
-    #sb-mascotte-fixed .sb-mascotte-fixed-badge{{
-      font-size:.68rem;font-weight:800;color:#052818;background:#4dff9f;border-radius:999px;padding:4px 10px;
-      border:1px solid #22c55e;white-space:nowrap;
-    }}
-    .btn-cmp-hist{{
-      background:#0f2f1f;color:#4dff9f;border:1px solid #166534;border-radius:8px;
-      padding:6px 12px;font-size:.78rem;font-weight:800;cursor:pointer;white-space:nowrap;
-    }}
-    .btn-cmp-hist:hover{{filter:brightness(1.12);border-color:#4dff9f}}
-    .badge-rec,.badge-pos{{display:inline-block;padding:4px 10px;border-radius:999px;font-size:.72rem;font-weight:800;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}}
-    .rec-gold{{background:#FFD700;color:#1a1200}}
-    .rec-gm{{background:#00ff88;color:#06210f}}
-    .rec-mkt{{background:#00aaff;color:#fff}}
-    .rec-high{{background:#ff8c00;color:#1a0a00}}
-    .rec-ok{{background:#888;color:#fff}}
-    .pos-t10{{background:#14532d;color:#bbf7d0}}
-    .pos-t25{{background:#22c55e;color:#052e16}}
-    .pos-mid{{background:#1e40af;color:#93c5fd}}
-    .pos-hi{{background:#c2410c;color:#ffedd5}}
-    @media (max-width: 768px) {{
-      body{{padding:12px}}
-      h1{{font-size:1.25rem}}
-      .sub{{font-size:.92rem}}
-      .upd{{font-size:.9rem}}
-      .scorecard{{flex-direction:column;align-items:flex-start}}
-      .f{{gap:8px}}
-      .f select, .f button{{width:100%;min-width:0}}
-      table{{min-width:1100px}}
-      th,td{{padding:9px;white-space:nowrap}}
-    }}
-  </style>
-</head>
-<body>
-  <div id="sb-mascotte-fixed" title="Suivi des prix sneakers — marché FR">
-    <span class="sb-mascotte-fixed-face" aria-hidden="true">👟</span>
-    <span class="sb-mascotte-fixed-badge">Prix FR</span>
-  </div>
-  <main class="wrap">
-    <h1>🛒 Comparateur FR multi-boutiques</h1>
-    <p class="sub">Comparaison crédible des prix sneakers/sport par boutique e-commerce opérant en France.</p>
-    <div class="upd">
-      <span>Dernière mise à jour : <strong>{last_update_label}</strong></span>
-      <span class="upd-badge upd-{last_update_state}">{state_label}</span>
-      <span id="clockHealth" class="upd-badge clock-{clock_state}">{clock_label}</span>
-      <span id="jobStatus" class="upd-badge job-idle">idle</span>
-      <span class="spacer"></span>
-      <a class="logout-link" href="/logout">Deconnexion</a>
-    </div>
-    <div class="scorecard">
-      <div class="score-main">
-        <span class="score-val" id="scoreTotal">Score global commercial: --/100</span>
-        <span class="score-grade g-risk" id="scoreGrade">N/A</span>
-        <span class="score-sub" id="scoreMeta">En attente...</span>
-      </div>
-      <div class="score-ctrl">
-        <label>Qualité produit <input type="number" id="pqsInput" min="0" max="100" value="80"></label>
-        <label>Performance <input type="number" id="perfInput" min="0" max="100" value="78"></label>
-        <button type="button" id="copySyncLink" class="sync-link">Copier lien mobile</button>
-        <button type="button" id="shareWhatsApp" class="sync-link">Partager WhatsApp</button>
-      </div>
-    </div>
-    <form class="f" method="get" action="/comparison">
-      <select name="brand" id="brandSelect" style="background:#121212;border:1px solid #2a2a2a;color:#fff;border-radius:10px;padding:10px 12px;min-width:220px">{brand_options}</select>
-      <select name="model" id="modelSelect" style="background:#121212;border:1px solid #2a2a2a;color:#fff;border-radius:10px;padding:10px 12px;min-width:220px">{model_options}</select>
-      <button type="submit">Comparer</button>
-    </form>
-    <div class="table-wrap">
-      <table id="cmp-table">
-        <thead><tr><th>Produit</th><th>Boutique</th><th class="min">Min</th><th class="moyen">Moyen</th><th class="max">Max</th><th>Score</th><th>Crédibilité</th><th>Google</th><th>Recommandation</th><th>Position</th><th>Historique</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="11" style="color:#9ca3af">Chargement…</td></tr></tbody>
-      </table>
-    </div>
-  </main>
-  <div id="modal-history-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:12000;justify-content:center;align-items:center;padding:16px">
-    <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;position:relative">
-      <button type="button" onclick="window.__cmpCloseHistory && window.__cmpCloseHistory()" style="position:absolute;top:12px;right:12px;background:#333;color:#fff;border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:16px">✕</button>
-      <h3 style="color:#00ff88;margin:0 0 16px">📊 Historique des prix — <span id="history-modal-title"></span></h3>
-      <div id="history-modal-body"><p style="color:#666">Chargement...</p></div>
-    </div>
-  </div>
-  <script>
-    const catalog = {js_catalog};
-    const brandSelect = document.getElementById('brandSelect');
-    const modelSelect = document.getElementById('modelSelect');
-    if (brandSelect && modelSelect) {{
-      brandSelect.addEventListener('change', () => {{
-        const models = catalog[brandSelect.value] || [];
-        modelSelect.innerHTML = '';
-        models.forEach(m => {{
-          const opt = document.createElement('option');
-          opt.value = m; opt.textContent = m;
-          modelSelect.appendChild(opt);
-        }});
-      }});
-    }}
-    const qs = new URLSearchParams({{
-      brand:(brandSelect && brandSelect.value) || {selected_brand!r},
-      model:(modelSelect && modelSelect.value) || {selected_model!r},
-      validated_only:'true'
-    }});
-    const rows = document.getElementById('rows');
-    const jobStatus = document.getElementById('jobStatus');
-    const clockHealth = document.getElementById('clockHealth');
-    const scoreTotal = document.getElementById('scoreTotal');
-    const scoreGrade = document.getElementById('scoreGrade');
-    const scoreMeta = document.getElementById('scoreMeta');
-    const pqsInput = document.getElementById('pqsInput');
-    const perfInput = document.getElementById('perfInput');
-    const copySyncLinkBtn = document.getElementById('copySyncLink');
-    const shareWhatsAppBtn = document.getElementById('shareWhatsApp');
-    function renderJobStatus(s) {{
-      if (!jobStatus) return;
-      const running = !!(s && s.running);
-      jobStatus.className = 'upd-badge ' + (running ? 'job-run' : 'job-idle');
-      if (running) {{
-        jobStatus.textContent = 'mise à jour en cours...';
-        if (clockHealth) {{
-          clockHealth.className = 'upd-badge clock-warning';
-          clockHealth.textContent = 'horloge active';
-        }}
-      }} else {{
-        const endAt = (s && s.last_end_at) ? String(s.last_end_at).slice(11,16) : '';
-        jobStatus.textContent = endAt ? `dernier run ${{endAt}}` : 'idle';
-      }}
-    }}
-    let jobStatusTimer = null;
-    function refreshJobStatus() {{
-      fetch('/api/update/fr/status')
-        .then(r => {{
-          if (r.status === 401) {{
-            if (jobStatusTimer) {{
-              clearInterval(jobStatusTimer);
-              jobStatusTimer = null;
-            }}
-            if (jobStatus) {{
-              jobStatus.className = 'upd-badge job-idle';
-              jobStatus.textContent = 'session expiree';
-            }}
-            return null;
-          }}
-          return r.json();
-        }})
-        .then(data => {{
-          if (data) renderJobStatus(data);
-        }})
-        .catch(() => {{
-          if (jobStatus) {{
-            jobStatus.className = 'upd-badge job-idle';
-            jobStatus.textContent = 'statut indisponible';
-          }}
-        }});
-    }}
-    refreshJobStatus();
-    jobStatusTimer = setInterval(refreshJobStatus, 15000);
-
-    function gradeClass(grade) {{
-      if (grade === 'Premium') return 'score-grade g-premium';
-      if (grade === 'Fiable') return 'score-grade g-fiable';
-      if (grade === 'A surveiller') return 'score-grade g-watch';
-      return 'score-grade g-risk';
-    }}
-    // Persistance des champs scorecard (évite impression de cases figées au reload).
-    const urlParams = new URLSearchParams(window.location.search);
-    const savedPqs = urlParams.get('pqs') || localStorage.getItem('scorecard_pqs') || '80';
-    const savedPerf = urlParams.get('perf') || localStorage.getItem('scorecard_perf') || '78';
-    if (pqsInput) pqsInput.value = String(savedPqs);
-    if (perfInput) perfInput.value = String(savedPerf);
-    function currentStateParams() {{
-      const p = new URLSearchParams(window.location.search);
-      p.set('brand', (brandSelect && brandSelect.value) || {selected_brand!r});
-      p.set('model', (modelSelect && modelSelect.value) || {selected_model!r});
-      p.delete('include_excluded');
-      if (pqsInput) p.set('pqs', String(Math.max(0, Math.min(100, Number(pqsInput.value || '80')))));
-      if (perfInput) p.set('perf', String(Math.max(0, Math.min(100, Number(perfInput.value || '78')))));
-      return p;
-    }}
-    function syncUrlState() {{
-      const p = currentStateParams();
-      window.history.replaceState(null, '', `${{window.location.pathname}}?${{p.toString()}}`);
-    }}
-
-    function refreshCommercialScore() {{
-      const pqs = Math.max(0, Math.min(100, Number((pqsInput && pqsInput.value) || 80)));
-      const perf = Math.max(0, Math.min(100, Number((perfInput && perfInput.value) || 78)));
-      localStorage.setItem('scorecard_pqs', String(Math.round(pqs)));
-      localStorage.setItem('scorecard_perf', String(Math.round(perf)));
-      const brand = (brandSelect && brandSelect.value) || {selected_brand!r};
-      const model = (modelSelect && modelSelect.value) || {selected_model!r};
-      const s = new URLSearchParams({{
-        brand,
-        model,
-        product_quality_score: String(Math.round(pqs)),
-        performance_score: String(Math.round(perf)),
-      }});
-      fetch('/api/scorecard/fr?' + s.toString())
-        .then(r => r.json())
-        .then(d => {{
-          const total = Number(d.total_score || 0).toFixed(2);
-          const grade = String(d.grade || 'Risque eleve');
-          const n = Number(d.items_count || 0);
-          if (scoreTotal) scoreTotal.textContent = `Score global commercial: ${{total}}/100`;
-          if (scoreGrade) {{
-            scoreGrade.className = gradeClass(grade);
-            scoreGrade.textContent = grade;
-          }}
-          if (scoreMeta) scoreMeta.textContent = n > 0 ? `${{n}} ligne(s) validée(s) utilisées` : 'Aucune ligne valide';
-        }})
-        .catch(() => {{
-          if (scoreTotal) scoreTotal.textContent = 'Score global commercial: indisponible';
-          if (scoreGrade) {{
-            scoreGrade.className = 'score-grade g-risk';
-            scoreGrade.textContent = 'N/A';
-          }}
-          if (scoreMeta) scoreMeta.textContent = 'Erreur de calcul scorecard';
-        }});
-    }}
-    refreshCommercialScore();
-    if (brandSelect) brandSelect.addEventListener('change', refreshCommercialScore);
-    if (modelSelect) modelSelect.addEventListener('change', refreshCommercialScore);
-    if (pqsInput) pqsInput.addEventListener('input', refreshCommercialScore);
-    if (perfInput) perfInput.addEventListener('input', refreshCommercialScore);
-    if (brandSelect) brandSelect.addEventListener('change', syncUrlState);
-    if (modelSelect) modelSelect.addEventListener('change', syncUrlState);
-    if (pqsInput) pqsInput.addEventListener('input', syncUrlState);
-    if (perfInput) perfInput.addEventListener('input', syncUrlState);
-    if (copySyncLinkBtn) {{
-      copySyncLinkBtn.addEventListener('click', async () => {{
-        try {{
-          syncUrlState();
-          await navigator.clipboard.writeText(window.location.href);
-          copySyncLinkBtn.textContent = 'Lien copié';
-          setTimeout(() => {{ copySyncLinkBtn.textContent = 'Copier lien mobile'; }}, 1400);
-        }} catch {{
-          copySyncLinkBtn.textContent = 'Copie impossible';
-          setTimeout(() => {{ copySyncLinkBtn.textContent = 'Copier lien mobile'; }}, 1400);
-        }}
-      }});
-    }}
-    if (shareWhatsAppBtn) {{
-      shareWhatsAppBtn.addEventListener('click', () => {{
-        try {{
-          syncUrlState();
-          const shareUrl = window.location.href;
-          // Lien texte uniquement (pas d'image envoyée par le bouton).
-          const txt = encodeURIComponent(shareUrl);
-          const waUrl = `https://api.whatsapp.com/send?text=${{txt}}`;
-          window.open(waUrl, '_blank');
-        }} catch {{
-          // no-op
-        }}
-      }});
-    }}
-    // Propager pqs/perf dans l'URL à chaque soumission du formulaire.
-    const form = document.querySelector('form.f');
-    if (form) {{
-      form.addEventListener('submit', (e) => {{
-        e.preventDefault();
-        const p = currentStateParams();
-        window.location.search = p.toString();
-      }});
-    }}
-
-    function escAttr(s) {{
-      return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
-    }}
-    function recBadgeClass(r) {{
-      const m = {{
-        '⭐ MEILLEUR PRIX': 'badge-rec rec-gold',
-        '💰 PRIX LE PLUS BAS': 'badge-rec rec-gm',
-        '✅ PRIX MARCHÉ': 'badge-rec rec-mkt',
-        '⚠️ PRIX ÉLEVÉ': 'badge-rec rec-high',
-        '👍 BON PRIX': 'badge-rec rec-ok'
-      }};
-      return m[r] || 'badge-rec rec-ok';
-    }}
-    function posBadgeClass(p) {{
-      const m = {{
-        'Top 10%': 'badge-pos pos-t10',
-        'Top 25%': 'badge-pos pos-t25',
-        'Milieu de gamme': 'badge-pos pos-mid',
-        'Haut de gamme': 'badge-pos pos-hi'
-      }};
-      return m[p] || 'badge-pos pos-mid';
-    }}
-    function sneakerModelId(brand, model) {{
-      return String(brand || '').trim() + '|' + String(model || '').trim();
-    }}
-    function cmpCloseHistory() {{
-      const ho = document.getElementById('modal-history-overlay');
-      if (ho) ho.style.display = 'none';
-    }}
-    window.__cmpCloseHistory = cmpCloseHistory;
-    function cmpRenderHistory(hist, trend) {{
-      hist = hist || {{}};
-      trend = trend || {{}};
-      const points = hist.history || [];
-      const trendIcons = {{ hausse: '📈', baisse: '📉', stable: '➡️' }};
-      const trendColors = {{ hausse: '#ff6b6b', baisse: '#00ff88', stable: '#ffd700' }};
-      const trKey = trend.trend;
-      const icon = trendIcons[trKey] || '—';
-      const color = trendColors[trKey] || '#aaa';
-      const chg = trend.change_pct != null ? Number(trend.change_pct) : 0;
-      let svgChart = '<p style="color:#666;font-size:13px">Pas assez de données pour le graphique (min. 2 snapshots)</p>';
-      if (points.length >= 2) {{
-        const prices = points.map(p => Number(p.price_avg));
-        const minP = Math.min(...prices);
-        const maxP = Math.max(...prices);
-        const range = (maxP - minP) || 1;
-        const W = 520, H = 80;
-        const pts = prices.map((p, i) => {{
-          const x = (i / (prices.length - 1)) * W;
-          const y = H - ((p - minP) / range) * (H - 10) - 5;
-          return x.toFixed(1) + ',' + y.toFixed(1);
-        }}).join(' ');
-        const dates = points.map(p => (p.recorded_at && String(p.recorded_at).substring(0, 10)) || '');
-        let circles = '';
-        for (let i = 0; i < points.length; i++) {{
-          const x = (i / (prices.length - 1)) * W;
-          const y = H - ((prices[i] - minP) / range) * (H - 10) - 5;
-          const dshort = dates[i] ? dates[i].substring(5) : '';
-          circles += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="#00ff88"/>';
-          circles += '<text x="' + x.toFixed(1) + '" y="' + (H + 15) + '" font-size="9" fill="#666" text-anchor="middle">' + escAttr(dshort) + '</text>';
-        }}
-        svgChart = '<svg width="100%" viewBox="0 0 ' + W + ' ' + (H + 20) + '" style="margin:12px 0;overflow:visible">' +
-          '<polyline points="' + pts + '" fill="none" stroke="#00ff88" stroke-width="2"/>' + circles + '</svg>';
-      }}
-      const hb = document.getElementById('history-modal-body');
-      if (!hb) return;
-      const tlab = trKey != null ? String(trKey) : '—';
-      hb.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:16px">' +
-        '<span>Tendance : <strong style="color:' + color + '">' + icon + ' ' + escAttr(tlab) + '</strong></span>' +
-        '<span>Variation : <strong style="color:' + color + '">' + (chg >= 0 ? '+' : '') + chg + '%</strong></span>' +
-        '<span>Min 30j : <strong style="color:#00ff88">' + escAttr(String(trend.min_30d != null ? trend.min_30d : '—')) + '\u00a0€</strong></span>' +
-        '<span>Max 30j : <strong style="color:#00ff88">' + escAttr(String(trend.max_30d != null ? trend.max_30d : '—')) + '\u00a0€</strong></span>' +
-        '<span>Snapshots : <strong>' + escAttr(String(trend.nb_snapshots != null ? trend.nb_snapshots : 0)) + '</strong></span>' +
-        '</div>' + svgChart +
-        (points.length === 0 ? '<p style="color:#666;font-size:13px">Aucun historique pour l’instant.</p>' : '');
-    }}
-    function cmpOpenHistory(modelId) {{
-      const ho = document.getElementById('modal-history-overlay');
-      if (!ho || !modelId) return;
-      ho.style.display = 'flex';
-      const ht = document.getElementById('history-modal-title');
-      if (ht) ht.textContent = String(modelId).split('|').join(' ');
-      const hb = document.getElementById('history-modal-body');
-      if (hb) hb.innerHTML = '<p style="color:#666">Chargement...</p>';
-      const enc = encodeURIComponent(modelId);
-      Promise.all([
-        fetch('/api/sneakers/' + enc + '/history?days=30', {{ cache: 'no-store' }}).then(r => {{ if (!r.ok) throw new Error('h'); return r.json(); }}),
-        fetch('/api/sneakers/' + enc + '/trend', {{ cache: 'no-store' }}).then(r => {{ if (!r.ok) throw new Error('t'); return r.json(); }})
-      ]).then((pair) => cmpRenderHistory(pair[0], pair[1]))
-        .catch(() => {{ if (hb) hb.innerHTML = '<p style="color:#ff4444">Historique non disponible</p>'; }});
-    }}
-
-    function renderRows(arr, relaxed=false) {{
-      if (!arr.length) {{
-        rows.innerHTML = '<tr><td colspan="11" style="color:#9ca3af">Aucune donnée pour ce filtre. Lancez d\\'abord run_market(\\'FR\\').</td></tr>';
-        return;
-      }}
-      const note = relaxed
-        ? '<tr><td colspan="11" style="color:#facc15;font-size:.82rem;">Mode fallback activé: résultats affichés hors validation stricte.</td></tr>'
-        : '';
-      rows.innerHTML = note + arr.map(it => {{
-        const c = it.credibility === 'high' ? 'h' : (it.credibility === 'medium' ? 'm' : 'l');
-        const score = Number(it.score || 0);
-        const reason = it.excluded ? ` (exclu: ${{it.exclusion_reason || 'raison_inconnue'}})` : '';
-        const gBadge = String(it.google_badge || 'none');
-        const gDev = (it.google_deviation_pct == null) ? null : Number(it.google_deviation_pct);
-        let gCell = '—';
-        if (gBadge === 'ok') {{
-          gCell = '🟢 Google ✅';
-        }} else if (gBadge === 'warn') {{
-          gCell = '🟡 Google ⚠️';
-        }} else if (gBadge === 'bad') {{
-          gCell = '🔴 Google ❌';
-        }}
-        const gHint = gDev == null ? '' : ' <span style="color:#6b7280;font-size:.75rem;">(~' + gDev.toFixed(1) + '%)</span>';
-        const mid = sneakerModelId(it.brand, it.model);
-        const rec = String(it.recommandation || '👍 BON PRIX');
-        const pos = String(it.position_client || 'Milieu de gamme');
-        const recCls = recBadgeClass(rec);
-        const posCls = posBadgeClass(pos);
-        return `<tr>
-          <td>${{it.brand}} ${{it.model}}</td>
-          <td>${{it.shop}} <span style="color:#6b7280;font-size:.77rem;">[${{it.source_status}}]</span></td>
-          <td class="cmp-price"><span class="cmp-price-inner">${{it.price_min.toFixed(2)}}${{String.fromCharCode(0xA0)}}€</span></td>
-          <td class="cmp-price"><span class="cmp-price-inner">${{it.price_avg.toFixed(2)}}${{String.fromCharCode(0xA0)}}€</span></td>
-          <td class="cmp-price"><span class="cmp-price-inner">${{it.price_max.toFixed(2)}}${{String.fromCharCode(0xA0)}}€</span></td>
-          <td>${{score}}/100</td>
-          <td><span class="pill ${{c}}">${{it.credibility}}</span><span style="color:#6b7280;font-size:.75rem;">${{reason}}</span></td>
-          <td>${{gCell}}${{gHint}}</td>
-          <td><span class="${{recCls}}" title="${{escAttr(rec)}}">${{escAttr(rec)}}</span></td>
-          <td><span class="${{posCls}}" title="${{escAttr(pos)}}">${{escAttr(pos)}}</span></td>
-          <td style="cursor:default">
-            <button type="button" class="btn-cmp-hist" data-mid="${{escAttr(mid)}}" title="Historique ~30 j.">Historique</button>
-          </td>
-        </tr>`;
-      }}).join('');
-    }}
-    if (rows) {{
-      rows.addEventListener('click', (ev) => {{
-        const btn = ev.target.closest('button.btn-cmp-hist');
-        if (!btn || !rows.contains(btn)) return;
-        ev.preventDefault();
-        ev.stopPropagation();
-        const mid = btn.getAttribute('data-mid') || '';
-        if (mid) cmpOpenHistory(mid);
-      }});
-    }}
-    const histOv = document.getElementById('modal-history-overlay');
-    if (histOv) histOv.addEventListener('click', (e) => {{ if (e.target === histOv) cmpCloseHistory(); }});
-
-    fetch('/api/comparison/fr?' + qs.toString())
-      .then(r => r.json())
-      .then(data => {{
-        const arr = data.items || [];
-        if (arr.length) {{
-          renderRows(arr, false);
-          return;
-        }}
-        // Fallback UX: si strict filtre tout, on affiche le meilleur disponible.
-        const qs2 = new URLSearchParams(qs.toString());
-        qs2.set('validated_only', 'false');
-        qs2.set('include_excluded', 'true');
-        return fetch('/api/comparison/fr?' + qs2.toString())
-          .then(r => r.json())
-          .then(data2 => renderRows(data2.items || [], true));
-      }})
-      .catch(() => {{
-        rows.innerHTML = '<tr><td colspan="11" style="color:#fca5a5">Erreur API comparaison.</td></tr>';
-      }});
-  </script>
-</body></html>"""
-    return HTMLResponse(content=html)
+    wa_number = get_admin_whatsapp_digits()
+    show_admin_topbar = _is_admin_session(request)
+    serp_sync_label = _format_last_sync_human()
+    return templates.TemplateResponse(
+        "comparison.html",
+        {
+            "request": request,
+            "show_admin_topbar": show_admin_topbar,
+            "last_update_label": last_update_label,
+            "last_update_state": last_update_state,
+            "state_label": state_label,
+            "clock_state": clock_state,
+            "clock_label": clock_label,
+            "brand_options": brand_options,
+            "model_options": model_options,
+            "catalog_dict": catalog,
+            "selected_brand": selected_brand,
+            "selected_model": selected_model,
+            "wa_number": wa_number,
+            "is_admin": show_admin_topbar,
+            "serp_sync_label": serp_sync_label,
+            "canonical_url": f"{public_base_url().rstrip('/')}/comparison",
+            "og_url": f"{public_base_url().rstrip('/')}/comparison",
+            "og_image": f"{public_base_url().rstrip('/')}/static/favicon.svg",
+        },
+    )
 
 
-@app.get("/premium")
-def premium_page():
-    html = """
-    <html>
-    <head>
-    <title>Premium Sneaker Intelligence</title>
-    <style>
-    body {
-        background:#050b12;
-        color:white;
-        font-family:Arial;
-        padding:40px;
-        text-align:center;
-    }
-    h1 { color:#00ffd5; }
-    .box {
-        border:1px solid rgba(0,255,213,0.3);
-        padding:25px;
-        border-radius:10px;
-        margin-top:30px;
-        background:rgba(0,0,0,0.6);
-    }
-    .btn {
-        display:inline-block;
-        margin-top:20px;
-        padding:15px 25px;
-        background:#00ffd5;
-        color:black;
-        text-decoration:none;
-        font-weight:bold;
-        border-radius:8px;
-    }
-    </style>
-    </head>
 
-    <body>
-
-    <h1>📡 Sneaker Intelligence Premium</h1>
-
-    <div class="box">
-
-    <p>✔ Accès aux meilleures opportunités sneakers</p>
-    <p>✔ Prix réels (min / max / profit)</p>
-    <p>✔ Mise à jour toutes les 2h</p>
-
-    <h2>💰 Offre</h2>
-    <p>1€ → Test 24h</p>
-    <p>10€ → Accès complet mensuel</p>
-
-    <h2>💳 Paiement Grey</h2>
-    <p>Envoyez le paiement à :</p>
-
-    <b>TON_EMAIL_GREY_ICI</b>
-
-    <p>Ensuite envoyez une capture :</p>
-
-    <b>TON_WHATSAPP_OU_TELEGRAM</b>
-
-    <p>Activation en moins de 5 minutes</p>
-
-    <a href="/search" class="btn">Retour à l'application</a>
-
-    </div>
-
-    </body>
-    </html>
-    """
-    return HTMLResponse(content=html)
+@app.get("/premium", response_class=HTMLResponse)
+def premium_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("premium.html", {"request": request})
 
 
 @app.get("/track/premium")
@@ -2934,142 +4112,67 @@ def track_premium() -> RedirectResponse:
 
 
 @app.get("/analytics", response_class=HTMLResponse)
-def analytics_page() -> HTMLResponse:
-    stats = get_stats()
-    views = int(stats.get("search_views", 0))
-    clicks = int(stats.get("premium_clicks", 0))
-    conversion = 0.0
-    if views > 0:
-        conversion = round((clicks / views) * 100, 2)
-    scraper_rows = get_scraper_health_rows()
-    up_rows = sum(1 for r in scraper_rows if bool(r.get("last_success")))
-    total_rows = len(scraper_rows)
-    coverage = round((up_rows / total_rows) * 100, 2) if total_rows else 0.0
-    scraper_tbody = "".join(
-        f"<tr>"
-        f"<td>{escape(str(r.get('scraper_name') or ''))}</td>"
-        f"<td>{'OK' if bool(r.get('last_success')) else 'KO'}</td>"
-        f"<td>{int(r.get('nb_products') or 0)}</td>"
-        f"<td>{escape(str(r.get('last_run') or ''))}</td>"
-        f"<td>{escape(str(r.get('error_message') or ''))}</td>"
-        f"</tr>"
-        for r in scraper_rows
-    ) or "<tr><td colspan='5' style='color:#94a3b8'>Aucune donnée de monitoring scraper.</td></tr>"
-    html = f"""
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Analytics — Sneaker Intelligence</title>
-  <style>
-    body {{
-      margin: 0;
-      min-height: 100vh;
-      background: #0b0b0b;
-      color: #f8fafc;
-      font-family: ui-sans-serif, system-ui, Arial, sans-serif;
-      padding: 2rem 1.25rem;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }}
-    .card {{
-      max-width: 1100px;
-      width: 100%;
-      border: 1px solid #27272a;
-      border-radius: 16px;
-      padding: 1.75rem 1.5rem;
-      background: linear-gradient(165deg, #111113 0%, #0a0a0c 100%);
-      box-shadow: 0 20px 40px rgba(0,0,0,.45);
-    }}
-    h1 {{
-      margin: 0 0 1.25rem;
-      font-size: 1.35rem;
-      font-weight: 800;
-      letter-spacing: .04em;
-      text-align: center;
-      color: #fff;
-    }}
-    .row {{
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 1rem;
-      margin: 0.85rem 0;
-      padding-bottom: 0.75rem;
-      border-bottom: 1px solid #27272a;
-    }}
-    .row:last-of-type {{ border-bottom: none; padding-bottom: 0; }}
-    .label {{ color: #cbd5e1; font-size: 0.95rem; }}
-    .value {{
-      color: #22c55e;
-      font-size: 1.35rem;
-      font-weight: 800;
-      font-variant-numeric: tabular-nums;
-    }}
-    .back {{
-      display: inline-block;
-      margin-top: 1.25rem;
-      color: #00ffd5;
-      text-decoration: none;
-      font-weight: 600;
-      font-size: 0.9rem;
-    }}
-    .back:hover {{ text-decoration: underline; }}
-    .table-wrap {{ margin-top: 20px; overflow-x: auto; border: 1px solid #27272a; border-radius: 10px; }}
-    table {{ width: 100%; border-collapse: collapse; min-width: 900px; }}
-    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid #1f2937; font-size: .9rem; }}
-    th {{ color: #93c5fd; text-transform: uppercase; letter-spacing: .04em; font-size: .74rem; }}
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>📊 ANALYTICS</h1>
-    <div class="row">
-      <span class="label">Visites</span>
-      <span class="value">{views}</span>
-    </div>
-    <div class="row">
-      <span class="label">Clics premium</span>
-      <span class="value">{clicks}</span>
-    </div>
-    <div class="row">
-      <span class="label">Conversion</span>
-      <span class="value">{conversion}%</span>
-    </div>
-    <div class="row">
-      <span class="label">Scrapers opérationnels</span>
-      <span class="value">{up_rows}/{total_rows}</span>
-    </div>
-    <div class="row">
-      <span class="label">Couverture scrapers</span>
-      <span class="value">{coverage}%</span>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Scraper</th>
-            <th>Status</th>
-            <th>Nb produits</th>
-            <th>Last run</th>
-            <th>Error message</th>
-          </tr>
-        </thead>
-        <tbody>
-          {scraper_tbody}
-        </tbody>
-      </table>
-    </div>
-    <p style="margin:0;text-align:center;">
-      <a class="back" href="/">← Retour</a>
-    </p>
-  </div>
-</body>
-</html>
-"""
-    return HTMLResponse(content=html)
+def analytics_page(request: Request) -> HTMLResponse:
+    if not _is_authenticated(request):
+        return RedirectResponse("/login?next=/analytics", status_code=303)
+    try:
+        # Robustesse route analytics: chaque bloc est isolé pour éviter toute 502.
+        # Performance: snapshot analytics complet caché 5 min.
+        try:
+            snap = _analytics_snapshot()
+        except Exception:
+            logger.exception("analytics: echec snapshot")
+            snap = {
+                "views": 0,
+                "clicks": 0,
+                "conversion": 0.0,
+                "scraper_rows": [],
+                "up_rows": 0,
+                "total_rows": 0,
+                "coverage": 0.0,
+                "freshness_label": "Inconnu",
+                "freshness_color": "#94a3b8",
+                "refresh_status_line": "",
+            }
+        views = int(snap.get("views") or 0)
+        clicks = int(snap.get("clicks") or 0)
+        conversion = float(snap.get("conversion") or 0.0)
+        scraper_rows_raw = list(snap.get("scraper_rows") or [])
+        up_rows = int(snap.get("up_rows") or 0)
+        total_rows = int(snap.get("total_rows") or 0)
+        coverage = float(snap.get("coverage") or 0.0)
+        freshness_label = str(snap.get("freshness_label") or "Inconnu")
+        freshness_color = str(snap.get("freshness_color") or "#94a3b8")
+        refresh_status_line = str(snap.get("refresh_status_line") or "").strip()
+        scraper_rows = [
+            {
+                "scraper_name": str(r.get("scraper_name") or ""),
+                "last_success": bool(r.get("last_success")),
+                "nb_products": int(r.get("nb_products") or 0),
+                "last_run": str(r.get("last_run") or ""),
+                "error_message": str(r.get("error_message") or ""),
+            }
+            for r in scraper_rows_raw
+        ]
+        return templates.TemplateResponse(
+            "analytics.html",
+            {
+                "request": request,
+                "freshness_color": freshness_color,
+                "freshness_label": freshness_label,
+                "refresh_status_line": refresh_status_line,
+                "views": views,
+                "clicks": clicks,
+                "conversion": conversion,
+                "up_rows": up_rows,
+                "total_rows": total_rows,
+                "coverage": coverage,
+                "scraper_rows": scraper_rows,
+            },
+        )
+    except Exception:
+        logger.exception("Erreur analytics page")
+        return templates.TemplateResponse("analytics_unavailable.html", {"request": request})
 
 
 def _load_supervisor_rows() -> list[dict[str, object]]:
@@ -3143,129 +4246,11 @@ def _run_supervisor_job(job_id: str) -> None:
 
 
 @app.get("/supervisor", response_class=HTMLResponse)
-def supervisor_page() -> HTMLResponse:
-    html = """<!doctype html>
-<html lang="fr">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Superviseur IA</title>
-  <style>
-    body { margin:0; background:#0b0b0b; color:#fff; font-family:ui-sans-serif,system-ui,Arial,sans-serif; padding:24px; }
-    .wrap { max-width:1200px; margin:0 auto; }
-    .card { border:1px solid #1f2937; background:#101010; border-radius:14px; padding:18px; margin-bottom:16px; }
-    h1 { margin:0 0 8px; color:#22c55e; letter-spacing:.03em; }
-    .btn { display:inline-block; border:1px solid #22c55e; color:#dcfce7; background:#14532d; padding:10px 14px; border-radius:10px; font-weight:700; cursor:pointer; }
-    .score { font-size:1.25rem; font-weight:800; color:#22c55e; margin-top:8px; }
-    .progress-wrap { width:100%; height:14px; background:#1f2937; border-radius:999px; overflow:hidden; margin-top:10px; }
-    .progress-bar { width:0%; height:100%; background:linear-gradient(90deg,#16a34a,#22c55e); transition:width .3s ease; }
-    table { width:100%; border-collapse:collapse; }
-    th,td { border-bottom:1px solid #1f2937; text-align:left; padding:10px 8px; vertical-align:top; }
-    th { color:#a7f3d0; font-size:.88rem; letter-spacing:.04em; text-transform:uppercase; }
-  </style>
-</head>
-<body>
-  <main class="wrap">
-    <section class="card">
-      <h1>🤖 SUPERVISEUR IA</h1>
-      <p style="margin:0 0 14px;color:#cbd5e1;">Detection des anomalies de prix sur FR/BE/LU.</p>
-      <button class="btn" id="startBtn">Lancer l'analyse</button>
-      <div id="statusTxt" style="margin-top:10px;color:#cbd5e1;">Statut: idle</div>
-      <div id="progressTxt" style="margin-top:6px;color:#93c5fd;">Progression: 0/0</div>
-      <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
-      <div class="score" id="scoreTxt">Score global de credibilite : 0%</div>
-    </section>
-    <section class="card">
-      <table>
-        <thead>
-          <tr>
-            <th>Marque</th>
-            <th>Modele</th>
-            <th>Marche</th>
-            <th>Status</th>
-            <th>Anomalies detectees</th>
-          </tr>
-        </thead>
-        <tbody id="rowsBody">
-          <tr><td colspan="5" style="padding:12px;color:#9ca3af;">Aucune analyse lancee.</td></tr>
-        </tbody>
-      </table>
-    </section>
-  </main>
-  <script>
-    let pollTimer = null;
-    const statusTxt = document.getElementById("statusTxt");
-    const progressTxt = document.getElementById("progressTxt");
-    const scoreTxt = document.getElementById("scoreTxt");
-    const rowsBody = document.getElementById("rowsBody");
-    const progressBar = document.getElementById("progressBar");
+def supervisor_page(request: Request) -> HTMLResponse:
+    if not _is_admin_session(request):
+        return RedirectResponse("/login?next=/supervisor", status_code=303)
+    return templates.TemplateResponse("supervisor.html", {"request": request})
 
-    function badge(action) {
-      const a = (action || "WARN").toUpperCase();
-      if (a === "OK") return { text: "🟢 OK", color: "#22c55e" };
-      if (a === "ALERT") return { text: "🔴 ALERT", color: "#ef4444" };
-      return { text: "🟡 WARN", color: "#f59e0b" };
-    }
-
-    function renderRows(results) {
-      if (!results || !results.length) {
-        rowsBody.innerHTML = '<tr><td colspan="5" style="padding:12px;color:#9ca3af;">Aucune donnee.</td></tr>';
-        return;
-      }
-      rowsBody.innerHTML = results.map((item) => {
-        const b = badge(item.action);
-        const anomalies = (item.anomalies || []).join(", ") || "-";
-        return `<tr>
-          <td>${item.brand || ""}</td>
-          <td>${item.model || ""}</td>
-          <td>${item.market || ""}</td>
-          <td style="color:${b.color};font-weight:700;">${b.text}</td>
-          <td>${anomalies}</td>
-        </tr>`;
-      }).join("");
-    }
-
-    function updateProgress(progress) {
-      const parts = String(progress || "0/0").split("/");
-      const done = Number(parts[0] || 0);
-      const total = Number(parts[1] || 0);
-      const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
-      progressBar.style.width = `${pct}%`;
-    }
-
-    function updateScore(results) {
-      const total = results.length;
-      const ok = results.filter((r) => String(r.action || "").toUpperCase() === "OK").length;
-      const score = total > 0 ? ((ok / total) * 100).toFixed(2) : "0.00";
-      scoreTxt.textContent = `Score global de credibilite : ${score}%`;
-    }
-
-    async function refreshStatus() {
-      const res = await fetch("/supervisor/status");
-      const data = await res.json();
-      statusTxt.textContent = `Statut: ${data.status}`;
-      progressTxt.textContent = `Progression: ${data.progress}`;
-      updateProgress(data.progress);
-      renderRows(data.results || []);
-      updateScore(data.results || []);
-      if (data.status === "done" && pollTimer) {
-        clearInterval(pollTimer);
-        pollTimer = null;
-      }
-    }
-
-    document.getElementById("startBtn").addEventListener("click", async () => {
-      await fetch("/supervisor/start", { method: "POST" });
-      if (pollTimer) clearInterval(pollTimer);
-      await refreshStatus();
-      pollTimer = setInterval(refreshStatus, 3000);
-    });
-
-    refreshStatus();
-  </script>
-</body>
-</html>"""
-    return HTMLResponse(content=html)
 
 
 @app.post("/supervisor/start")
@@ -3327,18 +4312,80 @@ def _build_model_aliases(model_in: str) -> list[str]:
     return out
 
 
+def _get_sneaker_image_url(brand: str, model: str) -> str:
+    """
+    Retourne l'URL d'image pour une paire en consultant sneakers_db.json.
+
+    Matching strict :
+    - La marque (brand) doit correspondre au champ "brand" de l'entrée DB.
+    - L'image ne doit pas être no-image.png ni vide.
+    - Le fichier local doit exister et avoir une taille > 0.
+    Retourne "" si aucune image fiable n'est trouvée (le HTML affiche le fallback 👟).
+    """
+    import json as _json
+    from pathlib import Path as _Path
+
+    static_dir = _Path(__file__).resolve().parent.parent / "static"
+    db_path = static_dir / "sneakers_db.json"
+    if not db_path.is_file():
+        return ""
+
+    try:
+        db = _json.loads(db_path.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+
+    brand_norm = (brand or "").strip().lower()
+    model_norm = (model or "").strip().lower()
+
+    # Lookup : correspondance exacte puis insensible à la casse
+    entry: dict | None = None
+    if model in db:
+        entry = db[model]
+    else:
+        for key, val in db.items():
+            if key.strip().lower() == model_norm:
+                entry = val
+                break
+
+    if not entry:
+        return ""
+
+    # Validation marque stricte (rejette toute confusion cross-brand)
+    db_brand = str(entry.get("brand") or "").strip().lower()
+    if db_brand and brand_norm and db_brand != brand_norm:
+        return ""
+
+    image = str(entry.get("image") or "").strip()
+
+    # Rejette les placeholders explicites
+    if not image or "no-image" in image.lower():
+        return ""
+
+    # Pour les images locales : vérifie existence et taille non nulle
+    if image.startswith("/static/"):
+        rel = image[len("/static/"):]  # "images/air-force-1-low.jpg"
+        local_path = static_dir / rel
+        if not local_path.is_file() or local_path.stat().st_size == 0:
+            return ""
+
+    return image
+
+
 def _load_market_live_rows_full() -> list[dict[str, object]]:
     """
-    Lit market_live.csv avec les champs nécessaires pour l'écran /search:
-    produit, min, max, avg, trend.
+    Lit market.csv avec les champs nécessaires pour l'écran /search:
+    produit, min, max, avg (optionnel), trend (optionnel).
+    avg est calculé comme (min+max)/2 si absent.
+    trend vaut "STABLE" par défaut si absent.
     """
     from pathlib import Path
     import csv
 
     app_dir = Path(__file__).resolve().parent  # .../sneaker_bot/app
     root_dir = app_dir.parent  # .../sneaker_bot
-    primary = app_dir / "data" / "market_live.csv"
-    fallback = root_dir / "market_live.csv"
+    primary = app_dir / "data" / "market.csv"
+    fallback = root_dir / "market.csv"
     path = primary if primary.is_file() else fallback
     if not path.is_file():
         return []
@@ -3350,8 +4397,7 @@ def _load_market_live_rows_full() -> list[dict[str, object]]:
             name_col = "product" if "product" in fieldnames else "produit" if "produit" in fieldnames else None
             if not name_col:
                 return []
-            needed = {"min", "max", "avg", "trend"}
-            if not needed.issubset(fieldnames):
+            if not {"min", "max"}.issubset(fieldnames):
                 return []
 
             rows: list[dict[str, object]] = []
@@ -3360,13 +4406,17 @@ def _load_market_live_rows_full() -> list[dict[str, object]]:
                 if not name:
                     continue
                 try:
+                    lo = float(r.get("min") or 0.0)
+                    hi = float(r.get("max") or 0.0)
+                    avg_val = float(r.get("avg") or 0.0) if "avg" in fieldnames else round((lo + hi) / 2, 2)
+                    trend_val = str(r.get("trend") or "STABLE").strip().upper() if "trend" in fieldnames else "STABLE"
                     rows.append(
                         {
                             "product": name,
-                            "min": float(r.get("min") or 0.0),
-                            "max": float(r.get("max") or 0.0),
-                            "avg": float(r.get("avg") or 0.0),
-                            "trend": str(r.get("trend") or "STABLE").strip().upper(),
+                            "min": lo,
+                            "max": hi,
+                            "avg": avg_val,
+                            "trend": trend_val,
                         }
                     )
                 except (TypeError, ValueError):
@@ -3428,6 +4478,7 @@ def _load_market_prices_rows(market: str) -> dict[tuple[str, str], dict[str, obj
 
 
 def _render_search_page(
+    request: Request,
     *,
     brand: str,
     model: str,
@@ -3498,16 +4549,21 @@ def _render_search_page(
         reco = "✅ Opportunité" if profit > 30 else "📊 Marché stable"
         badge_text, badge_class = _supervisor_badge(brand, model)
         product_label = f"{brand} {model}".strip() or str(result.get("product") or "")
-        image_slug = quote(f"{brand}-{model}".strip().replace(" ", "-"))
-        image_url = f"https://duckduckgo.com/i/{image_slug}.jpg"
+        image_url = _get_sneaker_image_url(brand, model)
+        img_tag = (
+            f'<img src="{escape(image_url)}" alt="{escape(product_label)}"'
+            f' onerror="this.onerror=null;this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';" />'
+            if image_url
+            else ""
+        )
+        fallback_display = "none" if image_url else "flex"
 
         result_block = f"""
         <section class="product-shell">
           <div class="product-hero fade">
             <div class="hero-media">
-              <img src="{escape(image_url)}" alt="{escape(product_label)}"
-                   onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" />
-              <div class="img-fallback">👟</div>
+              {img_tag}
+              <div class="img-fallback" style="display:{fallback_display};">👟</div>
             </div>
             <div class="hero-content">
               <h2>{escape(product_label)}</h2>
@@ -3561,106 +4617,17 @@ def _render_search_page(
 
     js_catalog = json.dumps(catalog, ensure_ascii=False)
 
-    html = f"""
-<html>
-<body style="background:#0b0b0b;color:white;font-family:sans-serif;padding:20px;max-width:1100px;margin:0 auto;">
-  <style>
-    @keyframes fadeInUp {{
-      from {{ opacity: 0; transform: translateY(10px); }}
-      to {{ opacity: 1; transform: translateY(0); }}
-    }}
-    .fade {{ animation: fadeInUp .45s ease both; }}
-    .product-shell {{ margin-top:20px; }}
-    .product-hero {{ display:flex; gap:16px; align-items:center; background:#111; border:1px solid #1f1f1f; border-radius:16px; padding:16px; }}
-    .hero-media {{ width:120px; height:120px; border-radius:12px; overflow:hidden; background:#0f0f0f; border:1px solid #2a2a2a; flex-shrink:0; display:flex; align-items:center; justify-content:center; }}
-    .hero-media img {{ width:100%; height:100%; object-fit:cover; }}
-    .img-fallback {{ display:none; width:100%; height:100%; align-items:center; justify-content:center; font-size:2.6rem; }}
-    .hero-content h2 {{ margin:0; font-size:2rem; font-weight:800; color:#f8fafc; }}
-    .cred {{ margin-top:8px; display:inline-block; padding:6px 10px; border-radius:999px; font-size:.85rem; }}
-    .badge-ok {{ background:rgba(34,197,94,.15); border:1px solid rgba(34,197,94,.4); color:#86efac; }}
-    .badge-warn {{ background:rgba(245,158,11,.15); border:1px solid rgba(245,158,11,.4); color:#fcd34d; }}
-    .badge-alert {{ background:rgba(239,68,68,.15); border:1px solid rgba(239,68,68,.4); color:#fca5a5; }}
-    .market-grid {{ margin-top:16px; display:grid; gap:12px; grid-template-columns:1fr; }}
-    .market-card {{ background:#121212; border:1px solid #2b2b2b; border-radius:14px; padding:14px; transition:border-color .2s ease, transform .2s ease; }}
-    .market-card:hover {{ border-color:#22c55e; transform:translateY(-2px); }}
-    .market-card.winner {{ border-color:#22c55e; box-shadow:0 0 0 1px rgba(34,197,94,.2) inset; }}
-    .market-head {{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }}
-    .market-head h3 {{ margin:0; color:#fff; }}
-    .missing {{ color:#94a3b8; margin:8px 0 0; }}
-    .badge-cheap {{ font-size:.75rem; background:#14532d; color:#bbf7d0; border:1px solid rgba(34,197,94,.45); border-radius:999px; padding:4px 8px; }}
-    .price-bar {{ position:relative; height:34px; margin:10px 0 8px; }}
-    .track {{ position:absolute; left:0; right:0; top:15px; height:4px; background:#1f2937; border-radius:999px; }}
-    .dot {{ position:absolute; top:2px; transform:translateX(-50%); font-size:.67rem; font-weight:700; padding:2px 5px; border-radius:7px; }}
-    .dot.min {{ background:#1d4ed8; color:#dbeafe; }}
-    .dot.avg {{ background:#15803d; color:#dcfce7; }}
-    .dot.max {{ background:#b91c1c; color:#fee2e2; }}
-    .card-badges {{ display:flex; gap:6px; flex-wrap:wrap; min-height:24px; }}
-    .badge-good {{ font-size:.72rem; background:#064e3b; color:#a7f3d0; border:1px solid rgba(16,185,129,.45); border-radius:999px; padding:4px 8px; }}
-    .badge-high {{ font-size:.72rem; background:#4c0519; color:#fda4af; border:1px solid rgba(244,63,94,.45); border-radius:999px; padding:4px 8px; }}
-    .analysis {{ margin-top:16px; border:1px solid #2a2a2a; border-radius:16px; background:linear-gradient(160deg, rgba(17,24,39,.65), rgba(2,6,23,.5)); padding:16px; }}
-    .analysis h3 {{ margin:0 0 8px; }}
-    .analysis p {{ margin:7px 0; color:#d1d5db; }}
-    .analysis .reco {{ margin-top:10px; font-weight:800; color:#22c55e; }}
-    .back-btn {{ display:inline-block; margin-top:18px; color:#22c55e; text-decoration:none; border:1px solid #22c55e55; border-radius:10px; padding:9px 14px; }}
-    @media (max-width: 900px) {{ .market-grid {{ grid-template-columns:1fr; }} .product-hero {{ flex-direction:column; align-items:flex-start; }} }}
-  </style>
-  <h1 style="margin:0 0 10px;">🔎 Recherche Sneaker (Marché France)</h1>
-  <p style="margin:0;color:#cbd5e1;font-size:.95rem;">Choisissez une marque et un modèle, puis analysez.</p>
+    return templates.TemplateResponse(
+        "search.html",
+        {
+            "request": request,
+            "brand_options": brand_options,
+            "model_options": model_options,
+            "result_block": result_block,
+            "js_catalog": js_catalog,
+        },
+    )
 
-  <form method="get" action="/search" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:center;">
-    <label style="display:block;">
-      <span style="display:block;margin-bottom:6px;color:#94a3b8;font-size:.8rem;">MARQUE</span>
-      <select name="brand" id="brandSelect" style="width:100%;padding:10px;border-radius:10px;border:1px solid #2d2d2d;background:#0f0f0f;color:#fff;">
-        {brand_options}
-      </select>
-    </label>
-    <label style="display:block;">
-      <span style="display:block;margin-bottom:6px;color:#94a3b8;font-size:.8rem;">MODÈLE</span>
-      <select name="model" id="modelSelect" style="width:100%;padding:10px;border-radius:10px;border:1px solid #2d2d2d;background:#0f0f0f;color:#fff;">
-        {model_options}
-      </select>
-    </label>
-    <button type="submit" style="padding:12px 16px;border-radius:12px;border:0;background:#00c896;color:#052e16;font-weight:800;cursor:pointer;">
-      Analyser
-    </button>
-  </form>
-
-  {result_block}
-
-  <a href="/" class="back-btn">← Retour</a>
-
-  <script>
-    const catalog = {js_catalog};
-    const brandSelect = document.getElementById("brandSelect");
-    const modelSelect = document.getElementById("modelSelect");
-
-    function refreshModels() {{
-      const brand = brandSelect.value;
-      const models = catalog[brand] || [];
-      modelSelect.innerHTML = "";
-
-      if (!models.length) {{
-        const opt = document.createElement("option");
-        opt.value = "";
-        opt.textContent = "No model";
-        modelSelect.appendChild(opt);
-        return;
-      }}
-
-      models.forEach(m => {{
-        const opt = document.createElement("option");
-        opt.value = m;
-        opt.textContent = m;
-        modelSelect.appendChild(opt);
-      }});
-    }}
-
-    brandSelect.addEventListener("change", refreshModels);
-  </script>
-</body>
-</html>
-"""
-    return HTMLResponse(html)
 
 
 def _search_result(brand_in: str, model_in: str) -> dict[str, object] | None:
@@ -3772,6 +4739,7 @@ def search(request: Request, brand: str = "", model: str = "", market: str = "FR
     # Validation rapide : brand + model doivent exister dans models_list.json.
     if brand_in not in catalog_ui:
         return _render_search_page(
+            request,
             brand=brand_in,
             model=model_in,
             result=None,
@@ -3781,6 +4749,7 @@ def search(request: Request, brand: str = "", model: str = "", market: str = "FR
         )
     if not model_in:
         return _render_search_page(
+            request,
             brand=brand_in,
             model=model_in,
             result=None,
@@ -3802,6 +4771,7 @@ def search(request: Request, brand: str = "", model: str = "", market: str = "FR
         # 2) Fallback to legacy market_live matching
         found, suggestions = _search_with_fallback(brand_in, model_in)
     return _render_search_page(
+        request,
         brand=brand_in,
         model=model_in,
         result=found,
@@ -3813,6 +4783,7 @@ def search(request: Request, brand: str = "", model: str = "", market: str = "FR
 
 @app.post("/search", response_class=HTMLResponse)
 def search_post(
+    request: Request,
     brand: str = Form(""),
     model: str = Form(""),
     market: str = Form("FR"),
@@ -3826,6 +4797,7 @@ def search_post(
     # Validation rapide : brand + model doivent exister dans models_list.json.
     if brand_in not in catalog_ui:
         return _render_search_page(
+            request,
             brand=brand_in,
             model=model_in,
             result=None,
@@ -3835,6 +4807,7 @@ def search_post(
         )
     if not model_in:
         return _render_search_page(
+            request,
             brand=brand_in,
             model=model_in,
             result=None,
@@ -3854,6 +4827,7 @@ def search_post(
     if found is None:
         found, suggestions = _search_with_fallback(brand_in, model_in)
     return _render_search_page(
+        request,
         brand=brand_in,
         model=model_in,
         result=found,

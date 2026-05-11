@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SneakerBot — Mission Control</title>
+<style>
+/* ════════════════════════════════════════════════════
+   MISSION CONTROL — PREMIUM DARK THEME
+   Palette : #0a0d12 bg / #00ff88 green / #ff9900 orange / #ff3344 red
+   Style : Datadog + Tesla + NASA cockpit
+════════════════════════════════════════════════════ */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:       #0a0d12;
+  --bg2:      #0e1318;
+  --bg3:      #13191f;
+  --border:   #1e2a35;
+  --green:    #00ff88;
+  --green-dim:#00c865;
+  --orange:   #ff9900;
+  --red:      #ff3344;
+  --blue:     #0088ff;
+  --text:     #c8d8e8;
+  --text-dim: #5a7080;
+  --font:     'SF Mono','Fira Code','Cascadia Code',Consolas,monospace;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
+
+/* ── Header ── */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 24px;border-bottom:1px solid var(--border);
+  background:var(--bg2);position:sticky;top:0;z-index:100;
+}
+.hdr-brand{display:flex;align-items:center;gap:12px}
+.hdr-logo{font-size:20px;font-weight:700;letter-spacing:-0.5px;color:#fff}
+.hdr-logo span{color:var(--green)}
+.hdr-badge{
+  font-size:10px;padding:2px 8px;border-radius:20px;
+  background:rgba(0,255,136,.12);border:1px solid rgba(0,255,136,.3);
+  color:var(--green);letter-spacing:1px;text-transform:uppercase;
+}
+.hdr-right{display:flex;align-items:center;gap:16px}
+#global-status-badge{
+  padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;
+  letter-spacing:1px;text-transform:uppercase;transition:all .3s;
+}
+.badge-healthy {background:rgba(0,255,136,.15);border:1px solid var(--green);color:var(--green)}
+.badge-degraded{background:rgba(255,153,0,.15);border:1px solid var(--orange);color:var(--orange)}
+.badge-critical{background:rgba(255,51,68,.15);border:1px solid var(--red);color:var(--red);animation:pulse-red 1.5s infinite}
+#clock{color:var(--text-dim);font-size:11px;min-width:120px;text-align:right}
+
+/* ── Layout ── */
+main{padding:20px 24px;max-width:1600px;margin:0 auto}
+.section-title{
+  font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);
+  margin:24px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border);
+}
+.grid{display:grid;gap:12px}
+.grid-2{grid-template-columns:repeat(2,1fr)}
+.grid-3{grid-template-columns:repeat(3,1fr)}
+.grid-4{grid-template-columns:repeat(4,1fr)}
+@media(max-width:1100px){.grid-4{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+
+/* ── Cards ── */
+.card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
+  padding:16px;position:relative;overflow:hidden;transition:border-color .2s;
+}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--accent-color,var(--border));transition:background .3s;
+}
+.card.green::before{background:var(--green)}
+.card.orange::before{background:var(--orange)}
+.card.red::before{background:var(--red)}
+.card:hover{border-color:rgba(255,255,255,.15)}
+
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.card-title{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim)}
+.status-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  background:var(--text-dim);transition:background .3s;
+}
+.dot-green {background:var(--green);box-shadow:0 0 6px var(--green)}
+.dot-orange{background:var(--orange);box-shadow:0 0 6px var(--orange);animation:pulse-orange 2s infinite}
+.dot-red   {background:var(--red);box-shadow:0 0 6px var(--red);animation:pulse-red 1.5s infinite}
+
+.card-value{font-size:26px;font-weight:700;color:#fff;line-height:1;margin-bottom:4px}
+.card-sub{font-size:11px;color:var(--text-dim)}
+.card-tag{
+  display:inline-block;margin-top:8px;padding:2px 8px;border-radius:4px;
+  font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+}
+.tag-green {background:rgba(0,255,136,.1);color:var(--green)}
+.tag-orange{background:rgba(255,153,0,.1);color:var(--orange)}
+.tag-red   {background:rgba(255,51,68,.1);color:var(--red)}
+.tag-blue  {background:rgba(0,136,255,.1);color:var(--blue)}
+
+/* ── Big status banner ── */
+#status-banner{
+  border-radius:10px;padding:20px 24px;
+  display:flex;align-items:center;gap:20px;
+  background:var(--bg3);border:1px solid var(--border);
+  transition:border-color .3s;margin-bottom:4px;
+}
+#status-banner.green{border-color:var(--green);background:rgba(0,255,136,.04)}
+#status-banner.orange{border-color:var(--orange);background:rgba(255,153,0,.04)}
+#status-banner.red{border-color:var(--red);background:rgba(255,51,68,.04)}
+.banner-icon{font-size:36px;line-height:1}
+.banner-text h2{font-size:18px;font-weight:700;color:#fff;margin-bottom:2px}
+.banner-text p{font-size:12px;color:var(--text-dim)}
+.banner-right{margin-left:auto;text-align:right}
+.banner-time{font-size:11px;color:var(--text-dim)}
+
+/* ── Alerts ── */
+.alert-item{
+  padding:10px 14px;border-radius:6px;border-left:3px solid;margin-bottom:8px;
+  display:flex;align-items:flex-start;gap:10px;
+}
+.alert-critical{background:rgba(255,51,68,.08);border-color:var(--red)}
+.alert-warning {background:rgba(255,153,0,.08);border-color:var(--orange)}
+.alert-info    {background:rgba(0,136,255,.08);border-color:var(--blue)}
+.alert-icon{font-size:14px;flex-shrink:0;margin-top:1px}
+.alert-body p{font-size:12px;color:var(--text);margin-bottom:2px}
+.alert-body small{font-size:10px;color:var(--text-dim)}
+.alert-source{
+  margin-left:auto;flex-shrink:0;
+  font-size:9px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--text-dim);white-space:nowrap;
+}
+
+/* ── Diagnostic panel ── */
+#diag-panel{
+  display:none;background:var(--bg3);border:1px solid var(--border);
+  border-radius:10px;padding:20px;margin-top:12px;
+}
+#diag-panel.visible{display:block}
+.diag-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px}
+.diag-item{
+  background:var(--bg2);border:1px solid var(--border);border-radius:6px;
+  padding:12px;display:flex;align-items:center;gap:10px;
+}
+.diag-item .label{font-size:11px;color:var(--text-dim)}
+.diag-item .val{font-size:12px;color:#fff;font-weight:600}
+.reco-list{list-style:none;display:flex;flex-direction:column;gap:6px}
+.reco-list li{
+  padding:8px 12px;background:var(--bg2);border-radius:6px;
+  border-left:2px solid var(--text-dim);font-size:12px;
+}
+.reco-ok{border-color:var(--green)!important;color:var(--green-dim)}
+.reco-warn{border-color:var(--orange)!important}
+.reco-crit{border-color:var(--red)!important;color:#ffa0a8}
+
+/* ── Buttons ── */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;padding:9px 20px;
+  border-radius:6px;border:1px solid;font-family:var(--font);
+  font-size:12px;font-weight:600;letter-spacing:.3px;cursor:pointer;
+  transition:all .2s;text-decoration:none;
+}
+.btn-primary{background:rgba(0,255,136,.1);border-color:var(--green);color:var(--green)}
+.btn-primary:hover{background:rgba(0,255,136,.2)}
+.btn-danger{background:rgba(255,51,68,.1);border-color:var(--red);color:var(--red)}
+.btn-secondary{background:var(--bg3);border-color:var(--border);color:var(--text)}
+.btn-secondary:hover{border-color:var(--text-dim)}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+#run-diag-btn .spin{display:none}
+#run-diag-btn.loading .spin{display:inline}
+#run-diag-btn.loading .idle-text{display:none}
+
+/* ── Progress bar ── */
+.progress-bar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin-top:8px}
+.progress-fill{height:100%;border-radius:3px;transition:width .5s}
+.fill-green {background:var(--green)}
+.fill-orange{background:var(--orange)}
+.fill-red   {background:var(--red)}
+
+/* ── Raw JSON viewer ── */
+.json-block{
+  background:#060a0d;border:1px solid var(--border);border-radius:6px;
+  padding:14px;font-size:11px;line-height:1.6;overflow:auto;
+  max-height:400px;white-space:pre-wrap;color:#a0c8d0;margin-top:10px;
+  display:none;
+}
+.json-block.visible{display:block}
+
+/* ── Metric table ── */
+.metric-table{width:100%;border-collapse:collapse;font-size:12px}
+.metric-table th{
+  text-align:left;padding:8px 10px;font-size:10px;
+  text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);
+  border-bottom:1px solid var(--border);
+}
+.metric-table td{padding:8px 10px;border-bottom:1px solid rgba(30,42,53,.7)}
+.metric-table tr:last-child td{border-bottom:none}
+.metric-table tr:hover td{background:rgba(255,255,255,.02)}
+
+/* ── Footer ── */
+footer{
+  padding:16px 24px;border-top:1px solid var(--border);
+  display:flex;justify-content:space-between;align-items:center;
+  color:var(--text-dim);font-size:11px;margin-top:32px;
+}
+
+/* ── Animations ── */
+@keyframes pulse-red{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes pulse-orange{0%,100%{opacity:1}50%{opacity:.6}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{display:inline-block;animation:spin .8s linear infinite}
+.fade-in{animation:fadeIn .3s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ── Loader skeleton ── */
+.skel{
+  background:linear-gradient(90deg,var(--bg3) 25%,var(--bg2) 50%,var(--bg3) 75%);
+  background-size:200% 100%;animation:shimmer 1.4s infinite;
+  border-radius:4px;height:20px;width:80%;
+}
+@keyframes shimmer{to{background-position:-200% 0}}
+</style>
+</head>
+<body>
+
+<!-- ══ HEADER ══════════════════════════════════════════════════════════════ -->
+<header>
+  <div class="hdr-brand">
+    <div class="hdr-logo">Sneaker<span>Bot</span></div>
+    <div class="hdr-badge">Mission Control</div>
+  </div>
+  <div class="hdr-right">
+    <span id="global-status-badge" class="badge-healthy">Chargement...</span>
+    <div id="clock">--:--:--</div>
+    <a href="/admin" class="btn btn-secondary" style="padding:5px 12px;font-size:11px">← Admin</a>
+  </div>
+</header>
+
+<!-- ══ MAIN ═════════════════════════════════════════════════════════════════ -->
+<main>
+
+  <!-- STATUS BANNER -->
+  <div id="status-banner" class="green">
+    <div class="banner-icon" id="banner-icon">🟢</div>
+    <div class="banner-text">
+      <h2 id="banner-title">Chargement en cours…</h2>
+      <p id="banner-sub">Collecte des métriques système</p>
+    </div>
+    <div class="banner-right">
+      <div class="banner-time" id="banner-time">—</div>
+      <div style="margin-top:6px;display:flex;gap:8px">
+        <button class="btn btn-primary" id="run-diag-btn" onclick="runDiagnostic()">
+          <span class="idle-text">▶ Run Diagnostic</span>
+          <span class="spin">↻</span><span class="spin" style="display:none"> Analyse…</span>
+        </button>
+        <button class="btn btn-secondary" onclick="refreshAll()" title="Rafraîchir">↺</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DIAGNOSTIC PANEL (hidden by default) -->
+  <div id="diag-panel">
+    <div class="section-title">Résultats du diagnostic</div>
+    <div class="diag-grid" id="diag-grid"></div>
+    <div class="section-title" style="margin-top:0">Recommandations</div>
+    <ul class="reco-list" id="reco-list"></ul>
+  </div>
+
+  <!-- ── SERVICES ── -->
+  <div class="section-title">Services</div>
+  <div class="grid grid-4" id="services-grid">
+    <div class="card"><div class="skel"></div></div>
+    <div class="card"><div class="skel"></div></div>
+    <div class="card"><div class="skel"></div></div>
+    <div class="card"><div class="skel"></div></div>
+  </div>
+
+  <!-- ── DATA FRESHNESS ── -->
+  <div class="section-title">Fraîcheur des données</div>
+  <div class="grid grid-2" id="data-grid">
+    <div class="card"><div class="skel"></div></div>
+    <div class="card"><div class="skel"></div></div>
+  </div>
+
+  <!-- ── SOURCES ── -->
+  <div class="section-title">Analyse des sources</div>
+  <div class="grid grid-3" id="sources-grid">
+    <div class="card"><div class="skel"></div></div>
+    <div class="card"><div class="skel"></div></div>
+    <div class="card"><div class="skel"></div></div>
+  </div>
+
+  <!-- ── SERPAPI / CLÉS ── -->
+  <div class="section-title">Clés API &amp; Budget</div>
+  <div class="grid grid-2" id="keys-grid">
+    <div class="card"><div class="skel"></div></div>
+    <div class="card"><div class="skel"></div></div>
+  </div>
+
+  <!-- ── ALERTS ── -->
+  <div class="section-title">Centre d'alertes</div>
+  <div id="alerts-container">
+    <div class="card"><div class="skel"></div></div>
+  </div>
+
+</main>
+
+<footer>
+  <span>SneakerBot Mission Control © 2026</span>
+  <span id="footer-refresh">Dernière mise à jour : —</span>
+</footer>
+
+<!-- ══ JAVASCRIPT ════════════════════════════════════════════════════════════ -->
+<script>
+// ── Utilitaires ──────────────────────────────────────────────────────────────
+
+const $ = id => document.getElementById(id);
+
+function colorClass(c) {
+  if (c === 'green')  return 'green';
+  if (c === 'orange') return 'orange';
+  if (c === 'red')    return 'red';
+  return 'orange';
+}
+function dotClass(c)  { return 'status-dot dot-' + colorClass(c); }
+function tagClass(c)  { return 'card-tag tag-'  + colorClass(c); }
+function statusLabel(c) {
+  if (c === 'green')  return 'OK';
+  if (c === 'orange') return 'WARNING';
+  if (c === 'red')    return 'CRITICAL';
+  return 'UNKNOWN';
+}
+function colorIcon(c) {
+  if (c === 'green')  return '🟢';
+  if (c === 'orange') return '🟡';
+  if (c === 'red')    return '🔴';
+  return '⚪';
+}
+function fmtAge(min) {
+  if (min === undefined || min === null) return '—';
+  if (min < 60) return Math.round(min) + ' min';
+  return (min / 60).toFixed(1) + ' h';
+}
+function fmtPct(v) { return (v !== undefined && v !== null) ? v + '%' : '—'; }
+function fmtNum(v) { return (v !== undefined && v !== null) ? v.toLocaleString() : '—'; }
+
+function makeCard(color, title, value, sub, extra = '') {
+  const c = colorClass(color);
+  return `<div class="card ${c} fade-in">
+    <div class="card-header">
+      <span class="card-title">${title}</span>
+      <span class="${dotClass(color)}"></span>
+    </div>
+    <div class="card-value">${value}</div>
+    <div class="card-sub">${sub}</div>
+    ${extra}
+  </div>`;
+}
+
+// ── Clock ────────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  $('clock').textContent = now.toLocaleTimeString('fr-FR');
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+// ── Status Banner ────────────────────────────────────────────────────────────
+function updateBanner(status, checkedAt) {
+  const banner = $('status-banner');
+  const c = status === 'healthy' ? 'green' : status === 'degraded' ? 'orange' : 'red';
+  banner.className = c;
+  $('banner-icon').textContent = colorIcon(c);
+  $('banner-title').textContent =
+    status === 'healthy'  ? 'Tous les systèmes opérationnels' :
+    status === 'degraded' ? 'Dégradation détectée' :
+                            'Incident critique en cours';
+  $('banner-sub').textContent =
+    status === 'healthy'  ? 'SneakerBot fonctionne normalement.' :
+    status === 'degraded' ? 'Un ou plusieurs services nécessitent votre attention.' :
+                            'Intervention requise immédiatement.';
+  if (checkedAt) {
+    const d = new Date(checkedAt);
+    $('banner-time').textContent = 'Mis à jour ' + d.toLocaleTimeString('fr-FR');
+  }
+  // Header badge
+  const badge = $('global-status-badge');
+  badge.className = 'badge-' + (status === 'healthy' ? 'healthy' : status === 'degraded' ? 'degraded' : 'critical');
+  badge.textContent = status.toUpperCase();
+}
+
+// ── Services ─────────────────────────────────────────────────────────────────
+const SERVICE_LABELS = {
+  fastapi_backend:  'FastAPI Backend',
+  scheduler:        'Scheduler',
+  pricing_engine:   'Pricing Engine',
+  source_aggregator:'Source Aggregator',
+  celery_worker:    'Celery Worker',
+  playwright_scraper:'Playwright',
+  logs:             'Logs',
+};
+
+function renderServices(data) {
+  let html = '';
+  for (const [key, info] of Object.entries(data)) {
+    const label = SERVICE_LABELS[key] || key;
+    const c = colorClass(info.color || 'orange');
+    let val = '—', sub = '';
+    if (key === 'fastapi_backend') { val = info.running ? 'RUNNING' : 'DOWN'; sub = info.note || ''; }
+    else if (key === 'scheduler')  { val = info.running ? 'RUNNING' : 'STOPPED'; sub = info.error || ''; }
+    else if (key === 'pricing_engine') { val = fmtNum(info.rows_available); sub = 'lignes disponibles'; }
+    else if (key === 'source_aggregator') { val = fmtNum(info.sources_count); sub = 'sources agrégées'; }
+    else if (key === 'celery_worker') { val = info.available ? info.count + ' worker(s)' : 'OFFLINE'; sub = (info.workers||[]).join(', ') || info.message || info.error || ''; }
+    else if (key === 'playwright_scraper') { val = info.installed ? 'INSTALLED' : 'N/A'; sub = info.note || ''; }
+    else if (key === 'logs') { val = fmtNum(info.error_count) + ' err'; sub = fmtNum(info.warning_count) + ' warnings'; }
+    html += makeCard(c, label, val, sub, `<span class="${tagClass(c)}">${statusLabel(c)}</span>`);
+  }
+  $('services-grid').innerHTML = html;
+}
+
+// ── Data Freshness ────────────────────────────────────────────────────────────
+const CSV_LABELS = {
+  market_fr_csv:       'market_fr.csv',
+  market_fr_sources_csv: 'market_fr_sources.csv',
+};
+
+function renderData(data) {
+  let html = '';
+  for (const [key, info] of Object.entries(data.files || {})) {
+    const label = CSV_LABELS[key] || key;
+    const c = colorClass(info.color || info.status || 'orange');
+    if (!info.exists) {
+      html += makeCard('red', label, 'ABSENT', info.message || 'Fichier manquant', `<span class="${tagClass('red')}">CRITICAL</span>`);
+      continue;
+    }
+    const pct = info.age_minutes ? Math.min(100, Math.round(info.age_minutes / 720 * 100)) : 0;
+    const fillClass = c === 'green' ? 'fill-green' : c === 'orange' ? 'fill-orange' : 'fill-red';
+    const extra = `
+      <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:8px">
+        <span class="${tagClass(c)}">${statusLabel(c)}</span>
+        <span style="font-size:10px;color:var(--text-dim)">${info.size_kb || '?'} KB · ${fmtNum(info.rows)} lignes</span>
+      </div>`;
+    html += makeCard(c, label, fmtAge(info.age_minutes), `Mis à jour : ${info.updated_at || '—'}`, extra);
+  }
+  $('data-grid').innerHTML = html;
+}
+
+// ── Sources ───────────────────────────────────────────────────────────────────
+function renderSources(data) {
+  if (!data.exists) {
+    $('sources-grid').innerHTML = makeCard('red','Sources','ABSENT', data.message||'');
+    return;
+  }
+  const c = colorClass(data.color || 'green');
+  let html = '';
+  html += makeCard(c, 'Total sources', fmtNum(data.total_sources), 'entrées dans le fichier', `<span class="${tagClass(c)}">${statusLabel(c)}</span>`);
+  html += makeCard('green', 'Boutiques distinctes', fmtNum(data.distinct_shops), 'shops uniques détectés');
+  const invC = data.invalid_prices > 0 ? 'red' : 'green';
+  const suspC = data.suspect_sources > 10 ? 'orange' : 'green';
+  html += `<div class="card fade-in ${colorClass(invC === 'red' || suspC === 'orange' ? invC : 'green')}">
+    <div class="card-header"><span class="card-title">Qualité</span><span class="${dotClass(invC)}"></span></div>
+    <table class="metric-table" style="margin-top:4px">
+      <tr><td style="color:var(--text-dim)">Sources valides</td><td>${fmtNum(data.valid_sources)}</td></tr>
+      <tr><td style="color:var(--text-dim)">Suspectes</td><td style="color:${data.suspect_sources>10?'var(--orange)':'inherit'}">${fmtNum(data.suspect_sources)}</td></tr>
+      <tr><td style="color:var(--text-dim)">Prix invalides</td><td style="color:${data.invalid_prices>0?'var(--red)':'inherit'}">${fmtNum(data.invalid_prices)}</td></tr>
+    </table>
+  </div>`;
+  $('sources-grid').innerHTML = html;
+}
+
+// ── Keys / SerpAPI ────────────────────────────────────────────────────────────
+function renderKeys(data) {
+  const serp = data.serpapi || {};
+  const sc = colorClass(serp.color || 'orange');
+  const usedPct = serp.used_pct || 0;
+  const fillClass = sc === 'green' ? 'fill-green' : sc === 'orange' ? 'fill-orange' : 'fill-red';
+
+  let serpHtml = `<div class="card ${sc} fade-in">
+    <div class="card-header"><span class="card-title">SerpAPI Budget</span><span class="${dotClass(sc)}"></span></div>
+    <div class="card-value">${fmtNum(serp.calls_this_month)}<span style="font-size:14px;color:var(--text-dim)"> / ${fmtNum(serp.monthly_cap)}</span></div>
+    <div class="card-sub">Mode : <strong>${serp.mode || '—'}</strong> · Moy. journalière : ${serp.daily_average || '—'}</div>
+    <div class="progress-bar" style="margin-top:10px"><div class="progress-fill ${fillClass}" style="width:${usedPct}%"></div></div>
+    <div style="display:flex;justify-content:space-between;margin-top:6px">
+      <span class="${tagClass(sc)}">${fmtPct(usedPct)} utilisé</span>
+      <span style="font-size:10px;color:var(--text-dim)">${fmtNum(serp.remaining)} restants (${fmtPct(serp.remaining_pct)})</span>
+    </div>
+    <div style="margin-top:8px;font-size:11px;color:var(--text-dim)">Clé : ${serp.key_present ? '✓ présente' : '✗ absente'} · Mois : ${serp.month || '—'}</div>
+  </div>`;
+
+  // Autres clés
+  let otherRows = '';
+  for (const [k, v] of Object.entries(data.other || {})) {
+    const oc = colorClass(v.color || 'orange');
+    otherRows += `<tr>
+      <td>${k}</td>
+      <td><span class="${tagClass(oc)}">${v.present ? 'Présente' : 'Absente'}</span></td>
+    </tr>`;
+  }
+  let otherHtml = `<div class="card fade-in">
+    <div class="card-header"><span class="card-title">Autres clés API</span><span class="status-dot"></span></div>
+    <table class="metric-table">
+      <thead><tr><th>Variable</th><th>État</th></tr></thead>
+      <tbody>${otherRows || '<tr><td colspan="2" style="color:var(--text-dim)">Aucune détectée</td></tr>'}</tbody>
+    </table>
+    <div style="margin-top:10px;font-size:10px;color:var(--text-dim)">${data.warning||''}</div>
+  </div>`;
+
+  $('keys-grid').innerHTML = serpHtml + otherHtml;
+}
+
+// ── Alerts ────────────────────────────────────────────────────────────────────
+function renderAlerts(data) {
+  const alerts = data.alerts || [];
+  if (!alerts.length) {
+    $('alerts-container').innerHTML = `<div class="card green fade-in"><div class="card-header"><span class="card-title">Alertes</span><span class="status-dot dot-green"></span></div><div style="color:var(--green);padding:8px 0">✓ Aucune alerte active</div></div>`;
+    return;
+  }
+  const summary = `<div style="display:flex;gap:10px;margin-bottom:12px">
+    ${data.critical_count ? `<span class="${tagClass('red')}">${data.critical_count} critique(s)</span>` : ''}
+    ${data.warning_count  ? `<span class="${tagClass('orange')}">${data.warning_count} warning(s)</span>` : ''}
+    ${data.info_count     ? `<span class="${tagClass('blue')}">${data.info_count} info</span>` : ''}
+  </div>`;
+
+  let items = '';
+  for (const a of alerts) {
+    const cls = a.type === 'critical' ? 'alert-critical' : a.type === 'warning' ? 'alert-warning' : 'alert-info';
+    const icon = a.type === 'critical' ? '🔴' : a.type === 'warning' ? '🟡' : 'ℹ️';
+    const ts = a.timestamp ? new Date(a.timestamp).toLocaleTimeString('fr-FR') : '';
+    items += `<div class="alert-item ${cls}">
+      <span class="alert-icon">${icon}</span>
+      <div class="alert-body">
+        <p>${a.message || ''}</p>
+        ${a.suggestion ? `<small>💡 ${a.suggestion}</small>` : ''}
+      </div>
+      <span class="alert-source">${a.source || ''}<br>${ts}</span>
+    </div>`;
+  }
+  $('alerts-container').innerHTML = `<div class="card fade-in">${summary}${items}</div>`;
+}
+
+// ── Diagnostic ────────────────────────────────────────────────────────────────
+async function runDiagnostic() {
+  const btn = $('run-diag-btn');
+  btn.disabled = true;
+  btn.classList.add('loading');
+  $('diag-panel').classList.remove('visible');
+
+  try {
+    const r = await fetch('/api/mission/diagnostic');
+    const d = await r.json();
+
+    // Grille de statuts
+    const checks = [
+      ['Backend',   d.backend?.color,    d.backend?.ok ? 'OK' : 'DOWN'],
+      ['Scheduler', d.scheduler?.color,  d.scheduler?.running ? 'RUNNING' : 'STOPPED'],
+      ['Pricing',   d.pricing?.color,    d.pricing?.rows + ' lignes'],
+      ['SerpAPI',   d.keys?.serpapi?.color, d.keys?.serpapi?.mode + ' · ' + fmtPct(d.keys?.serpapi?.used_pct)],
+      ['Celery',    d.celery?.color,     d.celery?.available ? 'ACTIVE' : 'OFFLINE'],
+      ['Logs',      d.logs?.color,       d.logs?.error_count + ' erreurs'],
+    ];
+    let gridHtml = '';
+    for (const [label, color, val] of checks) {
+      const c = colorClass(color || 'orange');
+      gridHtml += `<div class="diag-item">
+        <span class="${dotClass(c)}"></span>
+        <div><div class="label">${label}</div><div class="val">${val || '—'}</div></div>
+      </div>`;
+    }
+    $('diag-grid').innerHTML = gridHtml;
+
+    // Recommandations
+    const recos = d.recommendations || ['Aucune recommandation.'];
+    const recoHtml = recos.map(r => {
+      const ok   = r.toLowerCase().includes('aucune action') || r.toLowerCase().includes('opérationnel');
+      const crit = r.toLowerCase().includes('critique') || r.toLowerCase().includes('urgent');
+      const cls  = ok ? 'reco-ok' : crit ? 'reco-crit' : 'reco-warn';
+      const pfx  = ok ? '✓' : crit ? '⚠' : '→';
+      return `<li class="${cls}">${pfx} ${r}</li>`;
+    }).join('');
+    $('reco-list').innerHTML = recoHtml;
+
+    $('diag-panel').classList.add('visible');
+  } catch(e) {
+    $('reco-list').innerHTML = `<li class="reco-crit">⚠ Erreur lors du diagnostic : ${e.message}</li>`;
+    $('diag-panel').classList.add('visible');
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('loading');
+  }
+}
+
+// ── Refresh principal ─────────────────────────────────────────────────────────
+async function refreshAll() {
+  try {
+    const [statusR, servicesR, dataR, keysR, sourcesR, alertsR] = await Promise.all([
+      fetch('/api/mission/status').then(r=>r.json()),
+      fetch('/api/mission/services').then(r=>r.json()),
+      fetch('/api/mission/data').then(r=>r.json()),
+      fetch('/api/mission/keys').then(r=>r.json()),
+      fetch('/api/mission/sources').then(r=>r.json()),
+      fetch('/api/mission/alerts').then(r=>r.json()),
+    ]);
+    updateBanner(statusR.status || 'healthy', statusR.checked_at);
+    renderServices(servicesR);
+    renderData(dataR);
+    renderSources(sourcesR);
+    renderKeys(keysR);
+    renderAlerts(alertsR);
+    const now = new Date();
+    $('footer-refresh').textContent = 'Dernière mise à jour : ' + now.toLocaleTimeString('fr-FR');
+  } catch(e) {
+    console.error('refreshAll error:', e);
+    updateBanner('critical', null);
+  }
+}
+
+// ── Init & auto-refresh ───────────────────────────────────────────────────────
+refreshAll();
+setInterval(refreshAll, 30000); // auto-refresh toutes les 30s
+</script>
+</body>
+</html>

@@ -297,10 +297,9 @@ footer{padding:12px 20px;border-top:1px solid var(--b);display:flex;justify-cont
   <div id="alerts-wrap"><div class="card"><div class="skel"></div></div></div>
 </div>
 
-<!-- ── SERPAPI + WATCHDOG + TELEGRAM ─────────────── -->
-<div class="stitle">Clés API · Watchdog · Telegram</div>
-<div class="grid g3" id="ops-row">
-  <div class="card"><div class="skel"></div></div>
+<!-- ── SERPAPI + WATCHDOG ─────────────────────────── -->
+<div class="stitle">Clés API · Watchdog</div>
+<div class="grid g2" id="ops-row">
   <div class="card"><div class="skel"></div></div>
   <div class="card"><div class="skel"></div></div>
 </div>
@@ -329,7 +328,6 @@ footer{padding:12px 20px;border-top:1px solid var(--b);display:flex;justify-cont
   <button class="btn btn-r" onclick="runAction('clear-stuck-jobs','Vider les jobs bloqués + cache ?')">🧹 Clear Stuck Jobs</button>
   <button class="btn btn-s" onclick="showConfirm('restart-scheduler')">↺ Restart Scheduler</button>
   <button class="btn btn-s" onclick="showConfirm('scraper-test')">⚡ Scraper Test</button>
-  <button class="btn btn-s" onclick="testTelegram()">📨 Test Telegram</button>
 </div>
 <div id="action-result" style="font-size:11px;color:var(--dim);margin-bottom:8px;min-height:18px;white-space:pre-wrap"></div>
 
@@ -636,7 +634,7 @@ function renderAlerts(d){
   $('alerts-wrap').innerHTML=`<div class="card">${sum}${h}</div>`;
 }
 
-// ── Ops Row : SerpAPI + Watchdog + Telegram ───────────────────────────────────
+// ── Ops Row : SerpAPI + Watchdog ─────────────────────────────────────────────
 function renderOpsRow(keys,watchdog,telegram){
   let h='';
 
@@ -663,17 +661,6 @@ function renderOpsRow(keys,watchdog,telegram){
     <div class="cs">Activité : ${watchdog.last_activity||'—'}</div>
     <div class="cs">Âge : ${age(watchdog.age_minutes)} · ${num(watchdog.total_lines)} lignes</div>
     <span class="${tagCls(watchdog.color||'orange')}" style="margin-top:6px">${statusLbl(watchdog.color||'orange')}</span>
-  </div>`;
-
-  // Telegram
-  const tgCfg=telegram||{};
-  const tgC=tgCfg.configured?'green':'orange';
-  h+=`<div class="card ${cc(tgC)}">
-    <div class="ch"><span class="ct">Telegram Alerts</span><span class="${dotCls(tgC)}"></span></div>
-    <div class="cv" style="font-size:16px">${tgCfg.configured?'CONFIGURED':'NOT SET'}</div>
-    <div class="cs">${tgCfg.message||'BOT_TOKEN + CHAT_ID requis'}</div>
-    ${tgCfg.configured?`<button class="btn btn-g" style="margin-top:8px;padding:3px 10px;font-size:10px" onclick="testTelegram()">📨 Test</button>`:''}
-    <span class="${tagCls(tgC)}" style="margin-top:6px">${tgCfg.configured?'READY':'NOT_CONFIGURED'}</span>
   </div>`;
 
   $('ops-row').innerHTML=h;
@@ -900,6 +887,7 @@ function renderModules(data) {
 
   let h = '';
   for (const [k, m] of Object.entries(mods)) {
+    if (k === 'telegram_alerts') continue;  // hidden — not used in this deployment
     const label  = MOD_LABELS[k] || k;
     const icon   = MOD_ICONS[k]  || '📦';
     const status = m.status || 'UNKNOWN';

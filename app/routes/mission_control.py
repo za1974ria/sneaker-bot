@@ -47,9 +47,10 @@ _TEMPLATES_DIR = _ROOT_DIR / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 # ── Seuils de fraîcheur (minutes) ─────────────────────────────────────────────
-FRESH_GREEN_MIN  = 240   # < 4h → green
-FRESH_ORANGE_MIN = 720   # 4–12h → orange
-# > 12h → red
+# Refresh 2×/jour (08:00 / 20:00) → un CSV de 7–12h est normal.
+FRESH_GREEN_MIN  = 720   # < 12h → green
+FRESH_ORANGE_MIN = 1080  # 12–18h → orange (warning visible, non-critique)
+# > 18h → red (critique)
 
 # ── Seuils SerpAPI (% utilisé) ────────────────────────────────────────────────
 SERP_GREEN_PCT  = 70
@@ -191,14 +192,18 @@ def _celery_status() -> dict[str, Any]:
 def _playwright_status() -> dict[str, Any]:
     """Détecte si Playwright est installé et opérationnel."""
     try:
+        import glob as _glob
         import playwright  # noqa: F401
-        # Vérifie la présence du binaire chromium
-        result = subprocess.run(
-            ["python3", "-m", "playwright", "install", "--dry-run"],
-            capture_output=True, text=True, timeout=5
-        )
-        installed = (result.returncode == 0 or "chromium" in (result.stdout + result.stderr).lower())
-        return {"installed": True, "color": "green" if installed else "orange", "note": "playwright disponible"}
+        # Vérifie la présence du binaire chromium dans le cache ms-playwright
+        # (évite un subprocess qui utiliserait le python système hors venv)
+        patterns = [
+            os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome"),
+            os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux/chrome"),
+        ]
+        browser_found = any(_glob.glob(p) for p in patterns)
+        if browser_found:
+            return {"installed": True, "color": "green", "note": "playwright opérationnel"}
+        return {"installed": True, "color": "orange", "note": "playwright installé — navigateur chromium manquant"}
     except ImportError:
         return {"installed": False, "color": "orange", "note": "playwright non installé"}
     except Exception as exc:
@@ -383,39 +388,46 @@ def _compute_global_status(services: dict, data: dict, keys: dict) -> str:
     """
     Retourne healthy / degraded / critical selon des règles strictes.
 
-    Services PRIMAIRES (affectent le statut global) :
-      - fastapi_backend, scheduler, pricing_engine, source_aggregator, logs
+    Services CRITIQUES (affectent le statut global) :
+      - fastapi_backend, scheduler, celery_worker, pricing_engine, source_aggregator
 
-    Services SECONDAIRES (optionnels — ne font pas degraded à eux seuls) :
-      - playwright_scraper, celery_worker
+    Services NON-CRITIQUES (n'affectent pas le statut global) :
+      - playwright_scraper, logs, diagnostics optionnels, SerpAPI budget
+
+    CSV freshness :
+      - orange (12–18h) : warning visible dans l'UI uniquement, n'impacte pas le statut global
+      - red (>18h ou absent) : critique, remonte en CRITICAL
 
     Règles :
-      CRITICAL : backend KO  OU  csv absent  OU  scheduler down  OU  logs erreurs critiques (>20)
-      DEGRADED : service primaire orange  OU  csv orange  OU  SerpAPI >70%  OU  logs orange
-      HEALTHY  : tout le reste
+      CRITICAL : service critique rouge  OU  csv absent/périmé (>18h, rouge)
+      DEGRADED : service critique orange
+      HEALTHY  : tout le reste (warnings CSV/playwright/logs visibles mais non bloquants)
     """
-    # ── Services primaires ────────────────────────────────────────────────────
-    PRIMARY_SERVICES = {"fastapi_backend", "scheduler", "pricing_engine", "source_aggregator", "logs"}
+    # ── Services critiques ────────────────────────────────────────────────────
+    CRITICAL_SERVICES = {
+        "fastapi_backend", "scheduler", "celery_worker",
+        "pricing_engine", "source_aggregator",
+    }
 
-    primary_colors: list[str] = []
-    for key, info in services.items():
-        if key in PRIMARY_SERVICES:
-            primary_colors.append(info.get("color", "green"))
-
-    # ── CSV ───────────────────────────────────────────────────────────────────
-    csv_colors: list[str] = [
-        f.get("color") or f.get("status") or "green"
-        for f in data.get("files", {}).values()
+    critical_colors: list[str] = [
+        info.get("color", "green")
+        for key, info in services.items()
+        if key in CRITICAL_SERVICES
     ]
 
-    # ── SerpAPI ───────────────────────────────────────────────────────────────
-    serp_color = (keys.get("serpapi") or {}).get("color", "green")
+    # ── CSV : seuls les rouges (absent ou >18h) sont critiques ───────────────
+    # Les oranges (12–18h) restent visibles dans les cards mais n'impactent pas le global.
+    csv_red: list[str] = [
+        "red"
+        for f in data.get("files", {}).values()
+        if (f.get("color") or f.get("status") or "green") == "red"
+    ]
 
-    all_primary = primary_colors + csv_colors + [serp_color]
+    all_critical = critical_colors + csv_red
 
-    if "red" in all_primary:
+    if "red" in all_critical:
         return "critical"
-    if "orange" in all_primary:
+    if "orange" in all_critical:
         return "degraded"
     return "healthy"
 

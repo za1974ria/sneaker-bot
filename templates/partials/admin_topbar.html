@@ -4,6 +4,7 @@
   <a href="/admin" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">🏠 Dashboard</a>
   <a href="/comparison" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">🔍 Comparateur</a>
   <a href="/analytics" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">📊 Analytics</a>
+  <a href="/mission-control" style="color:{% if request.url.path.startswith('/mission-control') %}#4dff9f{% else %}#9ca3af{% endif %};text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid {% if request.url.path.startswith('/mission-control') %}#166534{% else %}#1f2937{% endif %};background:{% if request.url.path.startswith('/mission-control') %}#0f2f1f{% else %}transparent{% endif %}">🛰️ Mission Control</a>
   <a href="/supervisor" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">🤖 AEGIS</a>
   <a href="/admin/visitors" style="color:{% if request.url.path.startswith('/admin/visitors') %}#4dff9f{% else %}#9ca3af{% endif %};text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid {% if request.url.path.startswith('/admin/visitors') %}#166534{% else %}#1f2937{% endif %};background:{% if request.url.path.startswith('/admin/visitors') %}#0f2f1f{% else %}transparent{% endif %}">👁️ Visiteurs</a>
   <a href="/admin/subscriptions" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">👥 Abonnements</a>

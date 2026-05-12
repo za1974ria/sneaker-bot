@@ -715,16 +715,13 @@ def _hash_password(plain: str) -> str:
 
 
 def _verify_password(plain: str, stored: str) -> bool:
-    """Vérifie un mot de passe contre un hash bcrypt (ou plaintext legacy)."""
+    """Vérifie un mot de passe contre un hash bcrypt."""
     if not plain or not stored:
         return False
-    if stored.startswith("$2b$") or stored.startswith("$2a$"):
-        try:
-            return bcrypt.checkpw(plain.encode("utf-8"), stored.encode("utf-8"))
-        except Exception:
-            return False
-    # Fallback plaintext pour migration (supprimé une fois tous les hashes migrés)
-    return plain.strip() == stored.strip()
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), stored.encode("utf-8"))
+    except Exception:
+        return False
 
 
 def _load_access_control() -> dict[str, object]:
@@ -776,8 +773,7 @@ def _load_access_control() -> dict[str, object]:
 
 def _find_user(username: str, password: str) -> dict[str, object] | None:
     """
-    Authentifie contre access_control (SQLite): clé « users », puis « accounts »,
-    puis identifiants à la racine (ancien schéma admin).
+    Authentifie contre access_control (SQLite): source unique raw["users"].
     """
     uname = str(username or "").strip()
     pw = str(password or "").strip()
@@ -808,29 +804,6 @@ def _find_user(username: str, password: str) -> dict[str, object] | None:
             m = _match_entry(user)
             if m is not None:
                 return m
-
-    accounts_list = raw.get("accounts")
-    if isinstance(accounts_list, list):
-        for user in accounts_list:
-            m = _match_entry(user)
-            if m is not None:
-                return m
-
-    root_user = raw.get("username")
-    root_pass = raw.get("password")
-    if root_user is not None and root_pass is not None:
-        ru = str(root_user).strip()
-        rp = str(root_pass)
-        if ru == uname and _verify_password(pw, rp):
-            role = str(raw.get("role") or "admin").strip().lower()
-            if role not in {"admin", "client"}:
-                role = "admin"
-            return {
-                "username": ru,
-                "password": rp,
-                "role": role,
-                "active": True,
-            }
 
     return None
 
@@ -4923,3 +4896,323 @@ def search_post(
         market=market_norm,
         suggestions=suggestions,
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECURITY — Password change + session invalidation
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SECURITY_AUDIT_PATH = Path(__file__).resolve().parents[1] / "data" / "security_audit.json"
+_SECURITY_LOCK = threading.Lock()
+
+_PW_MIN_LEN   = 12
+_PW_RE_UPPER  = re.compile(r"[A-Z]")
+_PW_RE_LOWER  = re.compile(r"[a-z]")
+_PW_RE_DIGIT  = re.compile(r"[0-9]")
+_PW_RE_SYMBOL = re.compile(r"[^A-Za-z0-9]")
+
+
+def _pw_validate(pw: str) -> list[str]:
+    errs: list[str] = []
+    if len(pw) < _PW_MIN_LEN:
+        errs.append(f"Minimum {_PW_MIN_LEN} caractères")
+    if not _PW_RE_UPPER.search(pw):
+        errs.append("Au moins une majuscule")
+    if not _PW_RE_LOWER.search(pw):
+        errs.append("Au moins une minuscule")
+    if not _PW_RE_DIGIT.search(pw):
+        errs.append("Au moins un chiffre")
+    if not _PW_RE_SYMBOL.search(pw):
+        errs.append("Au moins un caractère spécial")
+    return errs
+
+
+def _write_security_audit(entry: dict) -> None:
+    with _SECURITY_LOCK:
+        try:
+            data: list = []
+            if _SECURITY_AUDIT_PATH.exists():
+                try:
+                    data = json.loads(_SECURITY_AUDIT_PATH.read_text("utf-8"))
+                    if not isinstance(data, list):
+                        data = []
+                except Exception:
+                    data = []
+            data.append(entry)
+            if len(data) > 500:
+                data = data[-500:]
+            _SECURITY_AUDIT_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False), "utf-8")
+        except Exception as _exc:
+            logging.getLogger(__name__).warning("security_audit write error: %s", _exc)
+
+
+def _update_env_token_and_password(new_token: str, new_pw_hash: str, actor: str) -> bool:
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    log = logging.getLogger(__name__)
+    try:
+        lines = env_path.read_text("utf-8").splitlines(keepends=True)
+        new_lines: list[str] = []
+        found_token = found_pw = False
+        for line in lines:
+            if line.startswith("APP_AUTH_TOKEN="):
+                new_lines.append(f"APP_AUTH_TOKEN={new_token}\n")
+                found_token = True
+            elif line.startswith("APP_LOGIN_PASSWORD="):
+                new_lines.append(f"APP_LOGIN_PASSWORD={new_pw_hash}\n")
+                found_pw = True
+            else:
+                new_lines.append(line)
+        if not found_token:
+            new_lines.append(f"APP_AUTH_TOKEN={new_token}\n")
+        if not found_pw:
+            new_lines.append(f"APP_LOGIN_PASSWORD={new_pw_hash}\n")
+        tmp = env_path.with_suffix(".env.tmp")
+        tmp.write_text("".join(new_lines), "utf-8")
+        tmp.replace(env_path)
+        log.info("SECURITY: .env updated by %s (token rotated, pw updated)", actor)
+        return True
+    except Exception as exc:
+        log.error("SECURITY: .env update failed: %s", exc)
+        return False
+
+
+def _update_user_password_in_db(username: str, new_pw_hash: str) -> bool:
+    try:
+        payload = _load_access_control()
+        users = payload.get("users")
+        updated = False
+        if isinstance(users, list):
+            for u in users:
+                if isinstance(u, dict) and u.get("username") == username:
+                    u["password"] = new_pw_hash
+                    updated = True
+        if not updated:
+            return False
+        return bool(_db.save_access_control(payload))
+    except Exception as exc:
+        logging.getLogger(__name__).error("_update_user_password_in_db: %s", exc)
+        return False
+
+
+@app.post("/api/admin/change-password")
+async def api_admin_change_password(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    log = logging.getLogger(__name__)
+
+    if not _is_admin_session(request):
+        return JSONResponse({"ok": False, "error": "Non autorisé"}, status_code=401)
+
+    actor = str(request.cookies.get("sb_user") or "unknown").strip()
+    ip    = str(request.headers.get("X-Forwarded-For") or request.client.host or "?").split(",")[0].strip()
+
+    current_user = _find_user(actor, current_password)
+    if not current_user:
+        _write_security_audit({
+            "event": "password_change_failed", "reason": "wrong_current_password",
+            "actor": actor, "ip": ip, "ts": datetime.now().isoformat(),
+        })
+        return JSONResponse({"ok": False, "error": "Mot de passe actuel incorrect"}, status_code=403)
+
+    if new_password != confirm_password:
+        return JSONResponse({"ok": False, "error": "Les mots de passe ne correspondent pas"}, status_code=422)
+
+    issues = _pw_validate(new_password)
+    if issues:
+        return JSONResponse({"ok": False, "error": "Mot de passe trop faible", "issues": issues}, status_code=422)
+
+    new_hash = _hash_password(new_password)
+    if not _update_user_password_in_db(actor, new_hash):
+        log.error("change-password: DB write failed for %s", actor)
+        return JSONResponse({"ok": False, "error": "Erreur serveur — modification échouée"}, status_code=500)
+
+    _write_security_audit({
+        "event": "password_changed", "actor": actor,
+        "ip": ip, "ts": datetime.now().isoformat(),
+    })
+    log.info("SECURITY: password changed for %s from %s", actor, ip)
+
+    return JSONResponse({"ok": True, "message": "Mot de passe modifié."})
+
+
+@app.get("/api/admin/security-audit")
+def api_admin_security_audit(request: Request) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        data: list = []
+        if _SECURITY_AUDIT_PATH.exists():
+            data = json.loads(_SECURITY_AUDIT_PATH.read_text("utf-8"))
+        return JSONResponse({"events": list(reversed(data))[:100], "total": len(data)})
+    except Exception as exc:
+        return JSONResponse({"events": [], "error": str(exc)})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ACCOUNT ADMINISTRATION — create / disable / enable / reset / delete
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _get_all_users() -> list[dict]:
+    try:
+        payload = _load_access_control()
+        users = payload.get("users") or []
+        if not isinstance(users, list):
+            return []
+        return [
+            {
+                "username":   str(u.get("username") or ""),
+                "role":       str(u.get("role") or "client"),
+                "active":     bool(u.get("active", True)),
+                "created_at": str(u.get("created_at") or ""),
+            }
+            for u in users if isinstance(u, dict) and u.get("username")
+        ]
+    except Exception:
+        return []
+
+
+@app.get("/api/admin/users")
+def api_admin_users(request: Request) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse({"users": _get_all_users()})
+
+
+@app.post("/api/admin/users/create")
+async def api_admin_create_user(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    role: str = Form("client"),
+) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    actor = str(request.cookies.get("sb_user") or "unknown").strip()
+    ip    = str(request.headers.get("X-Forwarded-For") or request.client.host or "?").split(",")[0].strip()
+    role  = role.strip().lower()
+    if role not in ("admin", "client"):
+        return JSONResponse({"ok": False, "error": "Role invalide (admin ou client)"}, status_code=422)
+    issues = _pw_validate(password)
+    if issues:
+        return JSONResponse({"ok": False, "error": "Mot de passe trop faible", "issues": issues}, status_code=422)
+    ok, msg = _register_user(username.strip(), password, role=role)
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg}, status_code=409)
+    _write_security_audit({
+        "event": "user_created", "target": username.strip(),
+        "role": role, "actor": actor, "ip": ip, "ts": datetime.now().isoformat(),
+    })
+    logging.getLogger(__name__).info("ADMIN: user '%s' created (role=%s) by %s", username, role, actor)
+    return JSONResponse({"ok": True, "message": f"Compte '{username}' créé avec le rôle {role}."})
+
+
+def _set_user_active(username: str, active: bool, actor: str, ip: str) -> tuple[bool, str]:
+    try:
+        payload = _load_access_control()
+        users = payload.get("users") or []
+        if not isinstance(users, list):
+            return False, "Structure access_control invalide"
+        found = False
+        for u in users:
+            if isinstance(u, dict) and str(u.get("username") or "") == username:
+                u["active"] = active
+                found = True
+                break
+        if not found:
+            return False, f"Utilisateur '{username}' introuvable"
+        ok = bool(_db.save_access_control(payload))
+        if ok:
+            _write_security_audit({
+                "event":  "user_disabled" if not active else "user_enabled",
+                "target": username, "actor": actor, "ip": ip,
+                "ts":     datetime.now().isoformat(),
+            })
+        return ok, "" if ok else "Erreur écriture DB"
+    except Exception as exc:
+        return False, str(exc)[:120]
+
+
+@app.post("/api/admin/users/{username}/disable")
+async def api_admin_disable_user(request: Request, username: str) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    actor = str(request.cookies.get("sb_user") or "unknown").strip()
+    ip    = str(request.headers.get("X-Forwarded-For") or request.client.host or "?").split(",")[0].strip()
+    if username == actor:
+        return JSONResponse({"ok": False, "error": "Impossible de désactiver son propre compte"}, status_code=422)
+    ok, msg = _set_user_active(username, False, actor, ip)
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg}, status_code=404 if "introuvable" in msg else 500)
+    return JSONResponse({"ok": True, "message": f"Compte '{username}' désactivé."})
+
+
+@app.post("/api/admin/users/{username}/enable")
+async def api_admin_enable_user(request: Request, username: str) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    actor = str(request.cookies.get("sb_user") or "unknown").strip()
+    ip    = str(request.headers.get("X-Forwarded-For") or request.client.host or "?").split(",")[0].strip()
+    ok, msg = _set_user_active(username, True, actor, ip)
+    if not ok:
+        return JSONResponse({"ok": False, "error": msg}, status_code=404 if "introuvable" in msg else 500)
+    return JSONResponse({"ok": True, "message": f"Compte '{username}' réactivé."})
+
+
+@app.post("/api/admin/users/{username}/reset-password")
+async def api_admin_reset_password(
+    request: Request,
+    username: str,
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    actor = str(request.cookies.get("sb_user") or "unknown").strip()
+    ip    = str(request.headers.get("X-Forwarded-For") or request.client.host or "?").split(",")[0].strip()
+    if new_password != confirm_password:
+        return JSONResponse({"ok": False, "error": "Les mots de passe ne correspondent pas"}, status_code=422)
+    issues = _pw_validate(new_password)
+    if issues:
+        return JSONResponse({"ok": False, "error": "Mot de passe trop faible", "issues": issues}, status_code=422)
+    new_hash = _hash_password(new_password)
+    ok = _update_user_password_in_db(username, new_hash)
+    if not ok:
+        return JSONResponse({"ok": False, "error": "Utilisateur introuvable ou erreur DB"}, status_code=404)
+    _write_security_audit({
+        "event": "password_reset", "target": username,
+        "actor": actor, "ip": ip, "ts": datetime.now().isoformat(),
+    })
+    logging.getLogger(__name__).info("ADMIN: password reset for '%s' by %s", username, actor)
+    return JSONResponse({"ok": True, "message": f"Mot de passe de '{username}' réinitialisé."})
+
+
+@app.post("/api/admin/users/{username}/delete")
+async def api_admin_delete_user(request: Request, username: str) -> JSONResponse:
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    actor = str(request.cookies.get("sb_user") or "unknown").strip()
+    ip    = str(request.headers.get("X-Forwarded-For") or request.client.host or "?").split(",")[0].strip()
+    if username == actor:
+        return JSONResponse({"ok": False, "error": "Impossible de supprimer son propre compte"}, status_code=422)
+    try:
+        payload = _load_access_control()
+        users = payload.get("users") or []
+        if not isinstance(users, list):
+            return JSONResponse({"ok": False, "error": "Structure invalide"}, status_code=500)
+        before = len(users)
+        payload["users"] = [u for u in users if isinstance(u, dict) and u.get("username") != username]
+        if len(payload["users"]) == before:
+            return JSONResponse({"ok": False, "error": f"Utilisateur '{username}' introuvable"}, status_code=404)
+        if not _db.save_access_control(payload):
+            return JSONResponse({"ok": False, "error": "Erreur écriture DB"}, status_code=500)
+        _write_security_audit({
+            "event": "user_deleted", "target": username,
+            "actor": actor, "ip": ip, "ts": datetime.now().isoformat(),
+        })
+        logging.getLogger(__name__).info("ADMIN: user '%s' deleted by %s", username, actor)
+        return JSONResponse({"ok": True, "message": f"Compte '{username}' supprimé définitivement."})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)[:120]}, status_code=500)

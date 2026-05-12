@@ -5,45 +5,142 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Admin — SneakerBot</title>
   <style>
-    *{box-sizing:border-box}
-    body{margin:0;background:#0b0b0b;color:#e5e7eb;font-family:ui-sans-serif,system-ui,Arial,sans-serif;padding:24px}
-    .wrap{max-width:900px;margin:0 auto}
-    h1{margin:0 0 4px;font-size:1.55rem;color:#4dff9f;letter-spacing:.02em}
-    .sub{color:#6b7280;margin:0 0 28px;font-size:.92rem}
-    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
-    .card{background:#101010;border:1px solid #1f2937;border-radius:14px;padding:20px 22px;text-decoration:none;color:inherit;transition:border-color .15s,background .15s;display:block}
-    .card:hover{border-color:#4dff9f;background:#0f1a13}
-    .card-icon{font-size:1.8rem;margin-bottom:8px}
-    .card-title{font-size:1rem;font-weight:800;color:#e5e7eb;margin:0 0 4px}
-    .card-desc{font-size:.8rem;color:#6b7280;margin:0}
-    .badge-admin{display:inline-block;background:#14532d;color:#4dff9f;border:1px solid #166534;border-radius:999px;font-size:.68rem;font-weight:700;padding:2px 9px;margin-left:8px;vertical-align:middle;text-transform:uppercase;letter-spacing:.05em}
-    .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
-    .logout{color:#9ca3af;text-decoration:none;border:1px solid #2a2a2a;border-radius:8px;padding:5px 10px;font-size:.78rem;background:#111827}
-    .logout:hover{border-color:#4dff9f;color:#4dff9f}
-    .section-title{font-size:.72rem;font-weight:700;color:#4b5563;text-transform:uppercase;letter-spacing:.08em;margin:24px 0 10px}
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{
+      --bg:#0b0b0b;--card:#101010;--card2:#0e0e0e;--border:#1f2937;
+      --green:#4dff9f;--red:#f87171;--orange:#fb923c;--blue:#60a5fa;
+      --text:#e5e7eb;--muted:#6b7280;--font:ui-sans-serif,system-ui,Arial,sans-serif;
+      --r:12px;
+    }
+    body{background:var(--bg);color:var(--text);font-family:var(--font);padding:24px;min-height:100vh}
+    .wrap{max-width:1100px;margin:0 auto}
+
+    /* ── Top bar ── */
+    .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;gap:12px;flex-wrap:wrap}
+    h1{font-size:1.55rem;color:var(--green);letter-spacing:.02em}
+    .sub{color:var(--muted);font-size:.88rem;margin-top:2px}
+    .topbar-actions{display:flex;gap:8px;align-items:center}
+    .btn-ghost{color:#9ca3af;text-decoration:none;border:1px solid #2a2a2a;border-radius:8px;padding:5px 12px;font-size:.78rem;background:#111827;cursor:pointer;transition:border-color .15s,color .15s}
+    .btn-ghost:hover{border-color:var(--green);color:var(--green)}
+    .badge-admin{display:inline-block;background:#14532d;color:var(--green);border:1px solid #166534;border-radius:999px;font-size:.68rem;font-weight:700;padding:2px 9px;margin-left:8px;text-transform:uppercase;letter-spacing:.05em}
+
+    /* ── Section titles ── */
+    .section-title{font-size:.72rem;font-weight:700;color:#4b5563;text-transform:uppercase;letter-spacing:.08em;margin:28px 0 12px;display:flex;align-items:center;gap:8px}
+    .section-title::after{content:"";flex:1;height:1px;background:#1f2937}
+
+    /* ── Card grid ── */
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;text-decoration:none;color:inherit;transition:border-color .15s,background .15s;display:block;cursor:pointer}
+    .card:hover{border-color:var(--green);background:#0f1a13}
+    .card-icon{font-size:1.6rem;margin-bottom:8px}
+    .card-title{font-size:.95rem;font-weight:800;color:var(--text);margin:0 0 4px}
+    .card-desc{font-size:.78rem;color:var(--muted)}
+
+    /* ── Panel (full-width expandable section) ── */
+    .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;margin-bottom:12px}
+    .panel-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;cursor:pointer;user-select:none;gap:12px}
+    .panel-header:hover{background:#0f1a13}
+    .panel-title{font-size:.95rem;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}
+    .panel-body{padding:20px;border-top:1px solid var(--border);display:none}
+    .panel-body.open{display:block}
+    .chevron{color:var(--muted);transition:transform .2s;font-size:.9rem}
+    .chevron.open{transform:rotate(180deg)}
+
+    /* ── Password change form ── */
+    .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    @media(max-width:600px){.form-grid{grid-template-columns:1fr}}
+    .field{display:flex;flex-direction:column;gap:5px}
+    .field label{font-size:.78rem;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+    .field input{background:#0d0d0d;border:1px solid #2a2a2a;border-radius:8px;padding:9px 12px;color:var(--text);font-size:.9rem;transition:border-color .15s;outline:none;width:100%}
+    .field input:focus{border-color:var(--green)}
+    .field-full{grid-column:1/-1}
+    .pw-strength{height:3px;border-radius:2px;background:#1f2937;margin-top:4px;overflow:hidden}
+    .pw-strength-bar{height:100%;border-radius:2px;transition:width .3s,background .3s;width:0}
+    .pw-hints{font-size:.72rem;color:var(--muted);margin-top:4px;display:flex;flex-wrap:wrap;gap:4px}
+    .pw-hint{padding:2px 6px;border-radius:4px;background:#1f2937}
+    .pw-hint.ok{background:#14532d;color:var(--green)}
+
+    /* ── Buttons ── */
+    .btn{border:none;border-radius:8px;padding:9px 18px;font-size:.85rem;font-weight:700;cursor:pointer;transition:opacity .15s,background .15s;display:inline-flex;align-items:center;gap:6px}
+    .btn:disabled{opacity:.45;cursor:not-allowed}
+    .btn-green{background:var(--green);color:#0b0b0b}
+    .btn-green:hover:not(:disabled){background:#34d399}
+    .btn-red{background:#dc2626;color:#fff}
+    .btn-red:hover:not(:disabled){background:#ef4444}
+    .btn-orange{background:#d97706;color:#fff}
+    .btn-orange:hover:not(:disabled){background:#f59e0b}
+    .btn-blue{background:#1d4ed8;color:#fff}
+    .btn-blue:hover:not(:disabled){background:#2563eb}
+    .btn-sm{padding:5px 10px;font-size:.75rem;border-radius:6px}
+    .form-actions{display:flex;align-items:center;gap:12px;margin-top:18px;flex-wrap:wrap}
+
+    /* ── Alerts / toast ── */
+    .alert{padding:10px 14px;border-radius:8px;font-size:.83rem;font-weight:600;margin-top:12px;display:none}
+    .alert.ok{background:#14532d;color:var(--green);border:1px solid #166534;display:block}
+    .alert.err{background:#450a0a;color:var(--red);border:1px solid #7f1d1d;display:block}
+    .alert.warn{background:#431407;color:var(--orange);border:1px solid #7c2d12;display:block}
+
+    /* ── Users table ── */
+    .user-table-wrap{overflow-x:auto}
+    table.user-table{width:100%;border-collapse:collapse;font-size:.83rem}
+    table.user-table th{padding:8px 12px;text-align:left;color:var(--muted);font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap}
+    table.user-table td{padding:9px 12px;border-bottom:1px solid #1a1a1a;vertical-align:middle}
+    table.user-table tr:last-child td{border-bottom:none}
+    table.user-table tr:hover td{background:#111}
+    .role-badge{display:inline-block;border-radius:999px;padding:2px 8px;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+    .role-admin{background:#1e1b4b;color:#a5b4fc}
+    .role-client{background:#1c2a1c;color:#86efac}
+    .status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+    .status-active{background:var(--green)}
+    .status-inactive{background:var(--red)}
+    .user-actions{display:flex;gap:6px;flex-wrap:wrap}
+
+    /* ── Audit log ── */
+    .audit-list{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto}
+    .audit-item{background:#0d0d0d;border:1px solid #1a1a1a;border-radius:8px;padding:8px 12px;font-size:.78rem;display:flex;align-items:flex-start;gap:10px}
+    .audit-icon{font-size:1rem;flex-shrink:0}
+    .audit-meta{color:var(--muted);font-size:.7rem;margin-top:2px}
+    .audit-ev{font-weight:700;color:var(--text)}
+
+    /* ── Modals ── */
+    .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;align-items:center;justify-content:center;padding:16px}
+    .modal-overlay.open{display:flex}
+    .modal{background:#0e0e0e;border:1px solid var(--border);border-radius:16px;padding:28px;max-width:480px;width:100%;max-height:90vh;overflow-y:auto}
+    .modal h3{font-size:1rem;font-weight:800;margin-bottom:18px;color:var(--green)}
+    .modal .close-btn{float:right;background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.2rem;margin:-4px 0 0 0;padding:0}
+    .modal .close-btn:hover{color:var(--red)}
+
+    /* ── Spinner ── */
+    .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;flex-shrink:0}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
 <div class="wrap">
+
+  <!-- Top bar -->
   <div class="topbar">
     <div>
       <h1>SneakerBot <span class="badge-admin">Admin</span></h1>
-      <p class="sub">Panneau d'administration — sneakerbot.shop</p>
+      <p class="sub">Panneau d'administration · sneakerbot.shop</p>
     </div>
-    <a href="https://sneakerbot.shop" class="logout" style="margin-right:8px">← Accueil</a>
-    <a href="/logout" class="logout">Déconnexion</a>
+    <div class="topbar-actions">
+      <a href="https://sneakerbot.shop" class="btn-ghost">← Accueil</a>
+      <a href="/logout" class="btn-ghost">Déconnexion</a>
+    </div>
   </div>
 
+  <!-- ── OUTILS PRINCIPAUX ── -->
   <div class="section-title">Outils principaux</div>
   <div class="grid">
     <a href="/comparison" class="card">
       <div class="card-icon">🔍</div>
       <div class="card-title">Comparateur FR</div>
-      <div class="card-desc">Comparaison multi-boutiques des prix sneakers en France</div>
+      <div class="card-desc">Comparaison multi-boutiques des prix sneakers</div>
     </a>
     <a href="/admin/subscriptions" class="card">
       <div class="card-icon">👥</div>
-      <div class="card-title">Abonnements clients</div>
+      <div class="card-title">Abonnements</div>
       <div class="card-desc">Gérer, valider et rejeter les demandes d'abonnement</div>
     </a>
     <a href="/analytics" class="card">
@@ -53,24 +150,402 @@
     </a>
     <a href="/supervisor" class="card">
       <div class="card-icon">🤖</div>
-      <div class="card-title">Superviseur IA (AEGIS)</div>
+      <div class="card-title">AEGIS Supervisor</div>
       <div class="card-desc">Lancement et suivi du pipeline de vérification IA</div>
     </a>
   </div>
 
+  <!-- ── MONITORING ── -->
   <div class="section-title">Monitoring</div>
   <div class="grid">
+    <a href="/mission-control" class="card">
+      <div class="card-icon">🛸</div>
+      <div class="card-title">Mission Control</div>
+      <div class="card-desc">Supervision temps réel de tous les modules</div>
+    </a>
     <a href="/health" class="card">
       <div class="card-icon">🟢</div>
       <div class="card-title">Health Status</div>
-      <div class="card-desc">État du service, fraîcheur des données, qualité des prix</div>
+      <div class="card-desc">Fraîcheur des données, qualité des prix, état service</div>
     </a>
-    <a href="/api/admin/claude-validate?brand=Nike&limit=20" class="card" target="_blank">
+    <a href="/admin/visitors" class="card">
+      <div class="card-icon">👁️</div>
+      <div class="card-title">Visiteurs</div>
+      <div class="card-desc">Activité visiteurs, pages vues, sessions actives</div>
+    </a>
+    <a href="/api/admin/claude-validate?brand=Nike&limit=20" target="_blank" class="card">
       <div class="card-icon">🧠</div>
       <div class="card-title">Validation Claude AI</div>
-      <div class="card-desc">Analyse anomalies de prix par Claude Haiku — détection boutiques suspectes</div>
+      <div class="card-desc">Analyse anomalies prix — détection boutiques suspectes</div>
     </a>
   </div>
+
+  <!-- ── SECURITY ── -->
+  <div class="section-title">Sécurité</div>
+
+  <div class="panel" id="panel-pw">
+    <div class="panel-header" onclick="togglePanel('panel-pw')">
+      <div class="panel-title">🔐 Changer le mot de passe admin</div>
+      <span class="chevron" id="chv-panel-pw">▼</span>
+    </div>
+    <div class="panel-body" id="body-panel-pw">
+      <p style="font-size:.82rem;color:var(--muted);margin-bottom:16px">
+        Après modification, toutes les autres sessions actives sont invalidées.
+        Votre session en cours reste active avec le nouveau token.
+      </p>
+      <form id="form-pw" onsubmit="submitChangePw(event)">
+        <div class="form-grid">
+          <div class="field field-full">
+            <label>Mot de passe actuel</label>
+            <input type="password" name="current_password" id="pw-current" required autocomplete="current-password">
+          </div>
+          <div class="field">
+            <label>Nouveau mot de passe</label>
+            <input type="password" name="new_password" id="pw-new" required autocomplete="new-password" oninput="checkPwStrength(this.value)">
+            <div class="pw-strength"><div class="pw-strength-bar" id="pw-bar"></div></div>
+            <div class="pw-hints" id="pw-hints"></div>
+          </div>
+          <div class="field">
+            <label>Confirmer le mot de passe</label>
+            <input type="password" name="confirm_password" id="pw-confirm" required autocomplete="new-password">
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-green" id="btn-pw-submit">🔒 Modifier le mot de passe</button>
+          <span id="pw-spinner" style="display:none"><span class="spinner"></span></span>
+        </div>
+      </form>
+      <div id="pw-alert" class="alert"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="panel-audit">
+    <div class="panel-header" onclick="togglePanel('panel-audit')">
+      <div class="panel-title">📋 Journal d'audit sécurité</div>
+      <span class="chevron" id="chv-panel-audit">▼</span>
+    </div>
+    <div class="panel-body" id="body-panel-audit">
+      <div id="audit-list" class="audit-list">
+        <p style="color:var(--muted);font-size:.82rem">Chargement…</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── ACCOUNT ADMINISTRATION ── -->
+  <div class="section-title">Administration des comptes</div>
+
+  <div class="panel" id="panel-users">
+    <div class="panel-header" onclick="togglePanel('panel-users')">
+      <div class="panel-title">👤 Utilisateurs</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button class="btn btn-green btn-sm" onclick="event.stopPropagation();openCreateModal()">+ Créer</button>
+        <span class="chevron" id="chv-panel-users">▼</span>
+      </div>
+    </div>
+    <div class="panel-body" id="body-panel-users">
+      <div class="user-table-wrap">
+        <table class="user-table">
+          <thead><tr>
+            <th>Statut</th><th>Identifiant</th><th>Rôle</th><th>Créé le</th><th>Actions</th>
+          </tr></thead>
+          <tbody id="user-tbody"><tr><td colspan="5" style="color:var(--muted);padding:16px">Chargement…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- bottom spacer -->
+  <div style="height:40px"></div>
 </div>
+
+<!-- ── MODAL: Create user ── -->
+<div class="modal-overlay" id="modal-create">
+  <div class="modal">
+    <h3>👤 Créer un compte <button class="close-btn" onclick="closeModal('modal-create')">✕</button></h3>
+    <form id="form-create" onsubmit="submitCreateUser(event)">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="field">
+          <label>Identifiant</label>
+          <input type="text" name="username" id="new-username" required minlength="4" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>Rôle</label>
+          <select name="role" id="new-role" style="background:#0d0d0d;border:1px solid #2a2a2a;border-radius:8px;padding:9px 12px;color:var(--text);font-size:.9rem">
+            <option value="client">Client</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Mot de passe</label>
+          <input type="password" name="password" id="new-password" required autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirmer</label>
+          <input type="password" name="confirm_password" id="new-confirm" required autocomplete="new-password">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-green">Créer le compte</button>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-create')">Annuler</button>
+      </div>
+      <div id="create-alert" class="alert"></div>
+    </form>
+  </div>
+</div>
+
+<!-- ── MODAL: Reset password ── -->
+<div class="modal-overlay" id="modal-reset">
+  <div class="modal">
+    <h3>🔑 Réinitialiser le mot de passe <button class="close-btn" onclick="closeModal('modal-reset')">✕</button></h3>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:14px">Compte : <strong id="reset-username-label" style="color:var(--text)"></strong></p>
+    <input type="hidden" id="reset-target-user">
+    <form id="form-reset" onsubmit="submitResetPw(event)">
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div class="field">
+          <label>Nouveau mot de passe</label>
+          <input type="password" name="new_password" id="reset-pw" required autocomplete="new-password">
+        </div>
+        <div class="field">
+          <label>Confirmer</label>
+          <input type="password" name="confirm_password" id="reset-confirm" required autocomplete="new-password">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="btn btn-orange">Réinitialiser</button>
+        <button type="button" class="btn btn-ghost" onclick="closeModal('modal-reset')">Annuler</button>
+      </div>
+      <div id="reset-alert" class="alert"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+// ── Panel toggle ──────────────────────────────────────────────────────────────
+function togglePanel(id) {
+  const body = document.getElementById('body-' + id);
+  const chv  = document.getElementById('chv-' + id);
+  const open = body.classList.toggle('open');
+  chv.classList.toggle('open', open);
+  if (open) {
+    if (id === 'panel-audit') loadAudit();
+    if (id === 'panel-users') loadUsers();
+  }
+}
+
+// ── Password strength ─────────────────────────────────────────────────────────
+const PW_RULES = [
+  { re: /.{12,}/, label: '12+ caractères' },
+  { re: /[A-Z]/,  label: 'Majuscule' },
+  { re: /[a-z]/,  label: 'Minuscule' },
+  { re: /[0-9]/,  label: 'Chiffre' },
+  { re: /[^A-Za-z0-9]/, label: 'Symbole' },
+];
+function checkPwStrength(val) {
+  const met = PW_RULES.filter(r => r.re.test(val));
+  const pct = met.length / PW_RULES.length * 100;
+  const bar = document.getElementById('pw-bar');
+  bar.style.width = pct + '%';
+  bar.style.background = pct < 40 ? '#ef4444' : pct < 80 ? '#f59e0b' : '#4dff9f';
+  const hints = document.getElementById('pw-hints');
+  hints.innerHTML = PW_RULES.map(r =>
+    `<span class="pw-hint ${r.re.test(val) ? 'ok' : ''}">${r.label}</span>`
+  ).join('');
+}
+
+// ── Show alert ────────────────────────────────────────────────────────────────
+function showAlert(id, msg, type) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'alert ' + type;
+}
+
+// ── Change password ───────────────────────────────────────────────────────────
+async function submitChangePw(e) {
+  e.preventDefault();
+  const btn  = document.getElementById('btn-pw-submit');
+  const spin = document.getElementById('pw-spinner');
+  btn.disabled = true; spin.style.display = 'inline';
+  document.getElementById('pw-alert').className = 'alert';
+
+  const fd = new FormData(document.getElementById('form-pw'));
+  try {
+    const res = await fetch('/api/admin/change-password', { method: 'POST', body: fd });
+    const json = await res.json();
+    if (json.ok) {
+      showAlert('pw-alert', '✅ ' + json.message, 'ok');
+      document.getElementById('form-pw').reset();
+      checkPwStrength('');
+    } else {
+      const issues = json.issues ? '\n• ' + json.issues.join('\n• ') : '';
+      showAlert('pw-alert', '❌ ' + (json.error || 'Erreur') + issues, 'err');
+    }
+  } catch (err) {
+    showAlert('pw-alert', '❌ Erreur réseau: ' + err.message, 'err');
+  } finally {
+    btn.disabled = false; spin.style.display = 'none';
+  }
+}
+
+// ── Audit log ─────────────────────────────────────────────────────────────────
+const AUDIT_ICONS = {
+  password_changed:       '🔐',
+  password_change_failed: '⚠️',
+  password_reset:         '🔑',
+  user_created:           '➕',
+  user_disabled:          '🚫',
+  user_enabled:           '✅',
+  user_deleted:           '🗑️',
+};
+async function loadAudit() {
+  const el = document.getElementById('audit-list');
+  try {
+    const res  = await fetch('/api/admin/security-audit');
+    const json = await res.json();
+    const evts = json.events || [];
+    if (!evts.length) {
+      el.innerHTML = '<p style="color:var(--muted);font-size:.82rem">Aucun événement enregistré.</p>';
+      return;
+    }
+    el.innerHTML = evts.map(ev => {
+      const icon = AUDIT_ICONS[ev.event] || '📋';
+      const target = ev.target ? ` → <strong>${ev.target}</strong>` : '';
+      const detail = ev.reason ? ` (${ev.reason})` : '';
+      return `<div class="audit-item">
+        <span class="audit-icon">${icon}</span>
+        <div>
+          <div class="audit-ev">${ev.event}${target}${detail}</div>
+          <div class="audit-meta">${ev.ts ? ev.ts.substring(0,19).replace('T',' ') : '?'} · IP ${ev.ip || '?'} · par ${ev.actor || '?'}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(err) {
+    el.innerHTML = '<p style="color:var(--red);font-size:.82rem">Erreur chargement: ' + err.message + '</p>';
+  }
+}
+
+// ── Users table ───────────────────────────────────────────────────────────────
+let _currentUser = null;
+async function loadUsers() {
+  const tbody = document.getElementById('user-tbody');
+  try {
+    const res  = await fetch('/api/admin/users');
+    const json = await res.json();
+    const users = json.users || [];
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:16px">Aucun utilisateur.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = users.map(u => {
+      const dot    = `<span class="status-dot ${u.active ? 'status-active' : 'status-inactive'}"></span>`;
+      const status = u.active ? 'Actif' : 'Inactif';
+      const roleBadge = `<span class="role-badge role-${u.role}">${u.role}</span>`;
+      const created = u.created_at ? u.created_at.substring(0,10) : '—';
+      const disableBtn = u.active
+        ? `<button class="btn btn-sm btn-orange" onclick="disableUser('${u.username}')">Désactiver</button>`
+        : `<button class="btn btn-sm btn-blue"   onclick="enableUser('${u.username}')">Réactiver</button>`;
+      return `<tr>
+        <td>${dot}${status}</td>
+        <td style="font-weight:600">${u.username}</td>
+        <td>${roleBadge}</td>
+        <td style="color:var(--muted)">${created}</td>
+        <td><div class="user-actions">
+          <button class="btn btn-sm btn-ghost" onclick="openResetModal('${u.username}')">Réinitialiser MDP</button>
+          ${disableBtn}
+          <button class="btn btn-sm btn-red" onclick="deleteUser('${u.username}')">Supprimer</button>
+        </div></td>
+      </tr>`;
+    }).join('');
+  } catch(err) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:var(--red)">Erreur: ${err.message}</td></tr>`;
+  }
+}
+
+async function disableUser(username) {
+  if (!confirm(`Désactiver le compte "${username}" ?`)) return;
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/disable`, { method: 'POST' });
+  const j = await res.json();
+  alert(j.message || j.error || 'Erreur');
+  loadUsers();
+}
+
+async function enableUser(username) {
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/enable`, { method: 'POST' });
+  const j = await res.json();
+  alert(j.message || j.error || 'Erreur');
+  loadUsers();
+}
+
+async function deleteUser(username) {
+  if (!confirm(`⚠️ Supprimer définitivement le compte "${username}" ? Cette action est irréversible.`)) return;
+  const res = await fetch(`/api/admin/users/${encodeURIComponent(username)}/delete`, { method: 'POST' });
+  const j = await res.json();
+  alert(j.message || j.error || 'Erreur');
+  loadUsers();
+}
+
+// ── Modals ────────────────────────────────────────────────────────────────────
+function openModal(id)  { document.getElementById(id).classList.add('open') }
+function closeModal(id) { document.getElementById(id).classList.remove('open') }
+
+function openCreateModal() {
+  document.getElementById('form-create').reset();
+  document.getElementById('create-alert').className = 'alert';
+  openModal('modal-create');
+}
+
+function openResetModal(username) {
+  document.getElementById('reset-target-user').value = username;
+  document.getElementById('reset-username-label').textContent = username;
+  document.getElementById('form-reset').reset();
+  document.getElementById('reset-alert').className = 'alert';
+  openModal('modal-reset');
+}
+
+// Close modals on backdrop click
+document.querySelectorAll('.modal-overlay').forEach(el => {
+  el.addEventListener('click', e => { if (e.target === el) el.classList.remove('open') });
+});
+
+// ── Create user ───────────────────────────────────────────────────────────────
+async function submitCreateUser(e) {
+  e.preventDefault();
+  const fd = new FormData(document.getElementById('form-create'));
+  const pw  = document.getElementById('new-password').value;
+  const cpw = document.getElementById('new-confirm').value;
+  if (pw !== cpw) { showAlert('create-alert','❌ Les mots de passe ne correspondent pas','err'); return; }
+  try {
+    const res  = await fetch('/api/admin/users/create', { method: 'POST', body: fd });
+    const json = await res.json();
+    if (json.ok) {
+      showAlert('create-alert', '✅ ' + json.message, 'ok');
+      setTimeout(() => { closeModal('modal-create'); loadUsers(); }, 1200);
+    } else {
+      const issues = json.issues ? '\n• ' + json.issues.join('\n• ') : '';
+      showAlert('create-alert', '❌ ' + (json.error || 'Erreur') + issues, 'err');
+    }
+  } catch(err) { showAlert('create-alert', '❌ Erreur réseau', 'err'); }
+}
+
+// ── Reset password ────────────────────────────────────────────────────────────
+async function submitResetPw(e) {
+  e.preventDefault();
+  const username = document.getElementById('reset-target-user').value;
+  const fd = new FormData(document.getElementById('form-reset'));
+  const pw  = document.getElementById('reset-pw').value;
+  const cpw = document.getElementById('reset-confirm').value;
+  if (pw !== cpw) { showAlert('reset-alert','❌ Les mots de passe ne correspondent pas','err'); return; }
+  try {
+    const res  = await fetch(`/api/admin/users/${encodeURIComponent(username)}/reset-password`, { method: 'POST', body: fd });
+    const json = await res.json();
+    if (json.ok) {
+      showAlert('reset-alert', '✅ ' + json.message, 'ok');
+      setTimeout(() => closeModal('modal-reset'), 1500);
+    } else {
+      const issues = json.issues ? '\n• ' + json.issues.join('\n• ') : '';
+      showAlert('reset-alert', '❌ ' + (json.error || 'Erreur') + issues, 'err');
+    }
+  } catch(err) { showAlert('reset-alert', '❌ Erreur réseau', 'err'); }
+}
+</script>
 </body>
 </html>

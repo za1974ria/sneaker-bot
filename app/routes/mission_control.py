@@ -1246,3 +1246,700 @@ def api_mission_restart_scheduler(request: Request) -> JSONResponse:
             "message":  str(exc),
             "fallback": "sudo systemctl restart sneaker_bot",
         })
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE HEALTH — extended coverage (all 17 modules)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _trust_engine_status() -> dict[str, Any]:
+    """Trust Engine: import + smoke call."""
+    t0 = _now_ts()
+    try:
+        from app.trust_engine import build_trust_report
+        sample = build_trust_report(
+            brand="Nike", model="Test",
+            sources=[{"shop": "test", "price_avg": 100.0}],
+            market_meta={"confidence_score": 80},
+        )
+        ms = round((_now_ts() - t0) * 1000)
+        ok = isinstance(sample, dict) and "trust_score" in sample
+        return {
+            "status": "HEALTHY" if ok else "DEGRADED",
+            "color": "green" if ok else "orange",
+            "latency_ms": ms,
+            "last_activity": _utcnow_iso(),
+            "error_count": 0,
+            "note": f"trust_score={sample.get('trust_score')} (smoke OK)" if ok else "Réponse inattendue",
+        }
+    except Exception as exc:
+        return {
+            "status": "DOWN", "color": "red",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(),
+            "error_count": 1,
+            "note": str(exc)[:120],
+        }
+
+
+def _anomaly_detector_status() -> dict[str, Any]:
+    """Anomaly Detector: vérifie module + données sources."""
+    t0 = _now_ts()
+    try:
+        src_path = _DATA_DIR / "market_fr_sources.csv"
+        if not src_path.exists():
+            return {
+                "status": "DEGRADED", "color": "orange",
+                "latency_ms": 0, "last_activity": _utcnow_iso(),
+                "error_count": 0,
+                "note": "market_fr_sources.csv absent — détection impossible",
+            }
+        # Heuristique : compter les prix hors-IQR dans les données
+        import csv as _csv
+        prices: list[float] = []
+        with open(src_path, newline="", encoding="utf-8", errors="replace") as f:
+            reader = _csv.DictReader(f)
+            for row in reader:
+                try:
+                    prices.append(float(row.get("price_eur") or row.get("price") or 0))
+                except (ValueError, TypeError):
+                    pass
+        outliers = 0
+        if len(prices) >= 4:
+            sp = sorted(prices)
+            q1 = sp[int(len(sp) * 0.25)]
+            q3 = sp[int(len(sp) * 0.75)]
+            iqr = q3 - q1
+            lo, hi = q1 - 3 * iqr, q3 + 3 * iqr
+            outliers = sum(1 for p in prices if p < lo or p > hi)
+        ms = round((_now_ts() - t0) * 1000)
+        color = "orange" if outliers > 20 else "green"
+        return {
+            "status": "DEGRADED" if outliers > 20 else "HEALTHY",
+            "color": color,
+            "latency_ms": ms,
+            "last_activity": _utcnow_iso(),
+            "error_count": outliers,
+            "note": f"{outliers} prix anomaux détectés sur {len(prices)} entrées",
+        }
+    except Exception as exc:
+        return {
+            "status": "DOWN", "color": "red",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(),
+            "error_count": 1,
+            "note": str(exc)[:120],
+        }
+
+
+def _auth_status() -> dict[str, Any]:
+    """Auth/access-control: lecture DB + intégrité."""
+    t0 = _now_ts()
+    try:
+        from app.app import _load_access_control, AUTH_TOKEN
+        ac = _load_access_control()
+        users = ac.get("users") or []
+        n_users = len(users) if isinstance(users, list) else 0
+        n_admin = sum(1 for u in (users if isinstance(users, list) else [])
+                      if isinstance(u, dict) and u.get("role") == "admin")
+        token_ok = bool(AUTH_TOKEN and len(AUTH_TOKEN) >= 20)
+        ms = round((_now_ts() - t0) * 1000)
+        return {
+            "status": "HEALTHY" if token_ok else "DEGRADED",
+            "color": "green" if token_ok else "orange",
+            "latency_ms": ms,
+            "last_activity": _utcnow_iso(),
+            "error_count": 0,
+            "note": f"{n_users} utilisateurs ({n_admin} admins) · token {'OK' if token_ok else 'ABSENT'}",
+        }
+    except Exception as exc:
+        return {
+            "status": "DOWN", "color": "red",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(),
+            "error_count": 1,
+            "note": str(exc)[:120],
+        }
+
+
+def _subscriptions_db_status() -> dict[str, Any]:
+    """Subscriptions DB: vérifie la table subscriptions dans sneakerbot.db."""
+    t0 = _now_ts()
+    db_path = _DATA_DIR / "sneakerbot.db"
+    try:
+        import sqlite3
+        if not db_path.exists():
+            return {
+                "status": "DOWN", "color": "red",
+                "latency_ms": 0, "last_activity": _utcnow_iso(),
+                "error_count": 1, "note": "sneakerbot.db absent",
+            }
+        with sqlite3.connect(str(db_path), timeout=5) as conn:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+            subs = conn.execute("SELECT COUNT(*) FROM subscriptions").fetchone()[0] if "subscriptions" in tables else None
+        ms = round((_now_ts() - t0) * 1000)
+        note_parts = [f"tables: {', '.join(sorted(tables)[:6])}"]
+        if subs is not None:
+            note_parts.append(f"{subs} abonnements")
+        return {
+            "status": "HEALTHY", "color": "green",
+            "latency_ms": ms, "last_activity": _utcnow_iso(),
+            "error_count": 0, "note": " · ".join(note_parts),
+        }
+    except Exception as exc:
+        return {
+            "status": "DOWN", "color": "red",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(),
+            "error_count": 1, "note": str(exc)[:120],
+        }
+
+
+def _visitor_analytics_status() -> dict[str, Any]:
+    """Visitor analytics: vérifie le tracker + stats récentes."""
+    t0 = _now_ts()
+    try:
+        from app.analytics.tracker import get_stats
+        stats = get_stats() or {}
+        ms = round((_now_ts() - t0) * 1000)
+        total = stats.get("total_visits") or stats.get("visits") or 0
+        return {
+            "status": "HEALTHY", "color": "green",
+            "latency_ms": ms, "last_activity": _utcnow_iso(),
+            "error_count": 0,
+            "note": f"{total} visites enregistrées",
+        }
+    except Exception as exc:
+        return {
+            "status": "DEGRADED", "color": "orange",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(),
+            "error_count": 1,
+            "note": str(exc)[:120],
+        }
+
+
+def _comparison_api_status() -> dict[str, Any]:
+    """Comparison API: appel HTTP réel sur /api/v2/comparison/fr."""
+    t0 = _now_ts()
+    try:
+        req = _urllib_req.Request(
+            "http://127.0.0.1:5003/api/v2/comparison/fr?brand=Nike&model=Air+Force+1+Low",
+            headers={"User-Agent": "sneakerbot-healthcheck/1.0"},
+        )
+        with _urllib_req.urlopen(req, timeout=6) as resp:
+            body = json.loads(resp.read().decode())
+            ms = round((_now_ts() - t0) * 1000)
+            count = body.get("count", 0)
+        color = "green" if ms < 800 else "orange" if ms < 2000 else "red"
+        return {
+            "status": "HEALTHY" if count > 0 else "DEGRADED",
+            "color": color if count > 0 else "orange",
+            "latency_ms": ms, "last_activity": _utcnow_iso(),
+            "error_count": 0,
+            "note": f"{count} résultat(s) · {ms}ms",
+        }
+    except Exception as exc:
+        return {
+            "status": "DOWN", "color": "red",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(),
+            "error_count": 1, "note": str(exc)[:120],
+        }
+
+
+def _nginx_status() -> dict[str, Any]:
+    """Nginx: vérifie le processus + répond sur port 80."""
+    t0 = _now_ts()
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "nginx"],
+            capture_output=True, text=True, timeout=4,
+        )
+        active = result.stdout.strip() == "active"
+        ms = round((_now_ts() - t0) * 1000)
+
+        # Vérif config
+        cfg_ok = True
+        try:
+            cfg = subprocess.run(
+                ["nginx", "-t"],
+                capture_output=True, text=True, timeout=5,
+            )
+            cfg_ok = cfg.returncode == 0
+        except Exception:
+            cfg_ok = None  # type: ignore[assignment]
+
+        color = "green" if active else "red"
+        note_parts = ["active" if active else "inactif"]
+        if cfg_ok is True:
+            note_parts.append("config OK")
+        elif cfg_ok is False:
+            note_parts.append("config ERROR")
+            color = "orange"
+        return {
+            "status": "HEALTHY" if active else "DOWN",
+            "color": color, "latency_ms": ms,
+            "last_activity": _utcnow_iso(), "error_count": 0 if active else 1,
+            "note": " · ".join(note_parts),
+        }
+    except Exception as exc:
+        return {
+            "status": "DOWN", "color": "red",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(), "error_count": 1,
+            "note": str(exc)[:120],
+        }
+
+
+def _fastapi_backend_status() -> dict[str, Any]:
+    """FastAPI backend: appel HTTP /health + uptime systemd."""
+    t0 = _now_ts()
+    try:
+        req = _urllib_req.Request(
+            "http://127.0.0.1:5003/health",
+            headers={"User-Agent": "sneakerbot-healthcheck/1.0"},
+        )
+        with _urllib_req.urlopen(req, timeout=5) as resp:
+            ms = round((_now_ts() - t0) * 1000)
+            code = resp.status
+        color = "green" if ms < 400 else "orange" if ms < 1500 else "red"
+        # Uptime systemd
+        uptime_note = ""
+        try:
+            r2 = subprocess.run(
+                ["systemctl", "show", "sneaker_bot", "--property=ActiveEnterTimestamp"],
+                capture_output=True, text=True, timeout=3,
+            )
+            ts_str = r2.stdout.strip().split("=", 1)[-1].strip()
+            uptime_note = f" · up since {ts_str[:16]}" if ts_str else ""
+        except Exception:
+            pass
+        return {
+            "status": "HEALTHY", "color": color,
+            "latency_ms": ms, "last_activity": _utcnow_iso(),
+            "error_count": 0,
+            "note": f"HTTP {code} · {ms}ms{uptime_note}",
+        }
+    except Exception as exc:
+        return {
+            "status": "DOWN", "color": "red",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(), "error_count": 1,
+            "note": str(exc)[:120],
+        }
+
+
+def _serpapi_module_status() -> dict[str, Any]:
+    """SerpAPI budget module: budget + circuit breaker."""
+    t0 = _now_ts()
+    try:
+        data = _serpapi_status()
+        ms = round((_now_ts() - t0) * 1000)
+        pct = data.get("used_pct") or 0
+        hard_stop = bool(data.get("hard_stop"))
+        color = data.get("color", "green")
+        return {
+            "status": "DOWN" if hard_stop else ("DEGRADED" if pct > 85 else "HEALTHY"),
+            "color": "red" if hard_stop else color,
+            "latency_ms": ms, "last_activity": _utcnow_iso(),
+            "error_count": 1 if hard_stop else 0,
+            "note": f"{pct}% utilisé · {'HARD STOP' if hard_stop else data.get('mode','normal')}",
+        }
+    except Exception as exc:
+        return {
+            "status": "DOWN", "color": "red",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(), "error_count": 1,
+            "note": str(exc)[:120],
+        }
+
+
+def _csv_freshness_status() -> dict[str, Any]:
+    """CSV freshness: fraîcheur des deux fichiers de données principaux."""
+    t0 = _now_ts()
+    fr = _file_info(_DATA_DIR / "market_fr.csv")
+    src = _file_info(_DATA_DIR / "market_fr_sources.csv")
+    ms = round((_now_ts() - t0) * 1000)
+    colors = [fr.get("color", "red"), src.get("color", "red")]
+    worst = "red" if "red" in colors else "orange" if "orange" in colors else "green"
+    age_fr  = fr.get("age_minutes") or 0
+    age_src = src.get("age_minutes") or 0
+    return {
+        "status": "HEALTHY" if worst == "green" else ("DEGRADED" if worst == "orange" else "DOWN"),
+        "color": worst, "latency_ms": ms, "last_activity": _utcnow_iso(),
+        "error_count": 0,
+        "note": (
+            f"market_fr.csv {round(age_fr/60,1)}h · "
+            f"sources.csv {round(age_src/60,1)}h"
+            f" · {fr.get('rows',0)} + {src.get('rows',0)} lignes"
+        ),
+    }
+
+
+def _pricing_engine_status() -> dict[str, Any]:
+    """Pricing engine: disponibilité + couverture modèles."""
+    t0 = _now_ts()
+    fr = _file_info(_DATA_DIR / "market_fr.csv")
+    src = _file_info(_DATA_DIR / "market_fr_sources.csv")
+    ms = round((_now_ts() - t0) * 1000)
+    rows_fr = fr.get("rows") or 0
+    rows_src = src.get("rows") or 0
+    ok = rows_fr > 0 and rows_src > 0
+    return {
+        "status": "HEALTHY" if ok else "DEGRADED",
+        "color": "green" if ok else "orange",
+        "latency_ms": ms, "last_activity": _utcnow_iso(),
+        "error_count": 0 if ok else 1,
+        "note": f"{rows_fr} modèles · {rows_src} offres sources",
+    }
+
+
+def _source_aggregator_status() -> dict[str, Any]:
+    """Source aggregator: nombre de shops distincts détectés."""
+    t0 = _now_ts()
+    src = _file_info(_DATA_DIR / "market_fr_sources.csv")
+    ms = round((_now_ts() - t0) * 1000)
+    rows = src.get("rows") or 0
+    # Tenter de compter les shops distincts
+    distinct_shops = 0
+    try:
+        import csv as _csv
+        with open(_DATA_DIR / "market_fr_sources.csv", newline="", encoding="utf-8", errors="replace") as f:
+            reader = _csv.DictReader(f)
+            shops: set[str] = set()
+            for row in reader:
+                s = row.get("source") or row.get("shop") or ""
+                if s:
+                    shops.add(s.strip().lower())
+            distinct_shops = len(shops)
+    except Exception:
+        pass
+    ok = rows > 0
+    return {
+        "status": "HEALTHY" if ok else "DEGRADED",
+        "color": "green" if ok else "orange",
+        "latency_ms": ms, "last_activity": _utcnow_iso(),
+        "error_count": 0 if ok else 1,
+        "note": f"{rows} offres · {distinct_shops} boutiques distinctes",
+    }
+
+
+def _telegram_module_status() -> dict[str, Any]:
+    """Telegram alerts: configuration présente."""
+    cfg = _telegram_config()
+    return {
+        "status": "HEALTHY" if cfg.get("configured") else "DEGRADED",
+        "color": "green" if cfg.get("configured") else "orange",
+        "latency_ms": 0, "last_activity": _utcnow_iso(),
+        "error_count": 0,
+        "note": cfg.get("status", "unknown"),
+    }
+
+
+def _system_resources_status() -> dict[str, Any]:
+    """System resources: CPU/RAM/Disk wrapped as module."""
+    sys = _system_resources()
+    cpu = sys.get("cpu_pct") or 0
+    ram = sys.get("ram_pct") or 0
+    disk = sys.get("disk_pct") or 0
+    worst_color = (
+        "red" if sys.get("cpu_color") == "red" or sys.get("ram_color") == "red" or sys.get("disk_color") == "red"
+        else "orange" if sys.get("cpu_color") == "orange" or sys.get("ram_color") == "orange"
+        else "green"
+    )
+    return {
+        "status": "HEALTHY" if worst_color == "green" else ("DEGRADED" if worst_color == "orange" else "DOWN"),
+        "color": worst_color, "latency_ms": 0, "last_activity": _utcnow_iso(),
+        "error_count": 0,
+        "note": f"CPU {cpu}% · RAM {ram}% · Disk {disk}% · up {sys.get('uptime','?')}",
+    }
+
+
+def _watchdog_module_status() -> dict[str, Any]:
+    """Watchdog: état récent."""
+    w = _watchdog_info()
+    color = w.get("color", "orange")
+    status_map = {"active": "HEALTHY", "stale": "DEGRADED", "degraded": "DEGRADED", "unknown": "DEGRADED", "error": "DOWN"}
+    return {
+        "status": status_map.get(w.get("status", "unknown"), "DEGRADED"),
+        "color": color, "latency_ms": 0, "last_activity": w.get("last_activity") or _utcnow_iso(),
+        "error_count": 0,
+        "note": w.get("message") or f"watchdog {w.get('status','?')} · {w.get('age_minutes','?')}min",
+    }
+
+
+def _scheduler_module_status() -> dict[str, Any]:
+    """Scheduler: running status + last refresh."""
+    sched = _scheduler_status()
+    running = bool(sched.get("running"))
+    last_ref = sched.get("last_refresh") or {}
+    last_at = str(last_ref.get("last_end_at") or last_ref.get("updated_at") or _utcnow_iso())
+    return {
+        "status": "HEALTHY" if running else "DOWN",
+        "color": "green" if running else "red",
+        "latency_ms": 0, "last_activity": last_at[:19],
+        "error_count": 0 if running else 1,
+        "note": "APScheduler actif" if running else sched.get("error", "Scheduler arrêté"),
+    }
+
+
+def _celery_module_status() -> dict[str, Any]:
+    """Celery worker status."""
+    c = _celery_status()
+    available = bool(c.get("available"))
+    workers = c.get("workers") or []
+    return {
+        "status": "HEALTHY" if available else "DEGRADED",
+        "color": "green" if available else "orange",
+        "latency_ms": 0, "last_activity": _utcnow_iso(),
+        "error_count": 0,
+        "note": f"{len(workers)} worker(s) actif(s)" if available else "Celery non configuré ou inactif",
+    }
+
+
+def _build_all_modules() -> dict[str, Any]:
+    """
+    Construit le snapshot santé de tous les modules de la plateforme.
+    Retourne un dict {module_name: {status, color, latency_ms, last_activity, error_count, note}}.
+    """
+    modules: dict[str, Any] = {}
+
+    def _safe(name: str, fn: Any) -> None:
+        try:
+            modules[name] = fn()
+        except Exception as exc:
+            modules[name] = {
+                "status": "DOWN", "color": "red",
+                "latency_ms": 0, "last_activity": _utcnow_iso(),
+                "error_count": 1, "note": f"Exception: {exc!s:.100}",
+            }
+
+    _safe("fastapi_backend",     _fastapi_backend_status)
+    _safe("scheduler",           _scheduler_module_status)
+    _safe("celery_worker",       _celery_module_status)
+    _safe("pricing_engine",      _pricing_engine_status)
+    _safe("source_aggregator",   _source_aggregator_status)
+    _safe("trust_engine",        _trust_engine_status)
+    _safe("anomaly_detector",    _anomaly_detector_status)
+    _safe("serpapi_budget",      _serpapi_module_status)
+    _safe("csv_freshness",       _csv_freshness_status)
+    _safe("access_control_auth", _auth_status)
+    _safe("subscriptions_db",    _subscriptions_db_status)
+    _safe("visitor_analytics",   _visitor_analytics_status)
+    _safe("comparison_api",      _comparison_api_status)
+    _safe("watchdog",            _watchdog_module_status)
+    _safe("telegram_alerts",     _telegram_module_status)
+    _safe("nginx",               _nginx_status)
+    _safe("system_resources",    _system_resources_status)
+
+    # Global summary
+    statuses = [m.get("status", "DOWN") for m in modules.values()]
+    n_down     = statuses.count("DOWN")
+    n_degraded = statuses.count("DEGRADED")
+    global_status = "critical" if n_down > 0 else ("degraded" if n_degraded > 0 else "healthy")
+    global_color  = "red" if n_down > 0 else ("orange" if n_degraded > 0 else "green")
+
+    return {
+        "modules": modules,
+        "summary": {
+            "global_status": global_status,
+            "global_color":  global_color,
+            "total": len(modules),
+            "healthy": statuses.count("HEALTHY"),
+            "degraded": n_degraded,
+            "down": n_down,
+        },
+        "checked_at": _utcnow_iso(),
+    }
+
+
+# ── New action endpoints ───────────────────────────────────────────────────────
+
+@router.get("/api/mission/modules")
+def api_mission_modules(request: Request) -> JSONResponse:
+    """Snapshot santé de tous les modules de la plateforme (17 modules)."""
+    from app.app import _is_admin_session
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse(_build_all_modules())
+
+
+@router.post("/api/mission/actions/restart-backend")
+def api_mission_restart_backend(request: Request) -> JSONResponse:
+    """Redémarre le service sneaker_bot via systemctl (déclenche restart propre)."""
+    from app.app import _is_admin_session
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    try:
+        result = subprocess.run(
+            ["systemctl", "restart", "sneaker_bot"],
+            capture_output=True, text=True, timeout=20,
+        )
+        if result.returncode == 0:
+            return JSONResponse({
+                "status":       "restarted",
+                "message":      "sneaker_bot redémarré — reconnexion dans 5s",
+                "restarted_at": _utcnow_iso(),
+            })
+        return JSONResponse({
+            "status":  "error",
+            "message": result.stderr.strip()[:200] or "Erreur inconnue",
+            "code":    result.returncode,
+        })
+    except Exception as exc:
+        return JSONResponse({"status": "error", "message": str(exc)[:200]})
+
+
+@router.post("/api/mission/actions/trust-test")
+def api_mission_trust_test(request: Request) -> JSONResponse:
+    """Smoke-test du Trust Engine avec un jeu de données synthétique."""
+    from app.app import _is_admin_session
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    t0 = _now_ts()
+    try:
+        from app.trust_engine import build_trust_report
+        report = build_trust_report(
+            brand="Nike",
+            model="Air Force 1 Low",
+            sources=[
+                {"shop": "Foot Locker", "price_avg": 110.0},
+                {"shop": "Zalando", "price_avg": 119.99},
+                {"shop": "JD Sports", "price_avg": 105.0},
+            ],
+            market_meta={"confidence_score": 85},
+        )
+        ms = round((_now_ts() - t0) * 1000)
+        return JSONResponse({
+            "status":     "ok",
+            "trust_score": report.get("trust_score"),
+            "spread_pct":  report.get("price_spread_pct"),
+            "elapsed_ms":  ms,
+            "report":      report,
+            "tested_at":   _utcnow_iso(),
+        })
+    except Exception as exc:
+        return JSONResponse({
+            "status":  "error",
+            "message": str(exc)[:200],
+            "elapsed_ms": round((_now_ts() - t0) * 1000),
+        })
+
+
+@router.post("/api/mission/actions/force-refresh")
+def api_mission_force_refresh(request: Request) -> JSONResponse:
+    """Déclenche un refresh pricing FR via /api/refresh/fr (non bloquant)."""
+    from app.app import _is_admin_session
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    t0 = _now_ts()
+    try:
+        req = _urllib_req.Request(
+            "http://127.0.0.1:5003/api/refresh/fr",
+            data=b"",
+            method="POST",
+            headers={"User-Agent": "sneakerbot-admin/1.0"},
+        )
+        with _urllib_req.urlopen(req, timeout=10) as resp:
+            body = json.loads(resp.read().decode())
+        ms = round((_now_ts() - t0) * 1000)
+        return JSONResponse({
+            "status":       "triggered",
+            "message":      "Refresh FR déclenché",
+            "response":     body,
+            "elapsed_ms":   ms,
+            "triggered_at": _utcnow_iso(),
+        })
+    except Exception as exc:
+        return JSONResponse({
+            "status":  "error",
+            "message": str(exc)[:200],
+            "elapsed_ms": round((_now_ts() - t0) * 1000),
+        })
+
+
+@router.post("/api/mission/actions/rebuild-csv")
+def api_mission_rebuild_csv(request: Request) -> JSONResponse:
+    """Force la reconstruction des CSV depuis les données DB."""
+    from app.app import _is_admin_session
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    t0 = _now_ts()
+    rebuilt: list[str] = []
+    errors: list[str] = []
+    try:
+        req = _urllib_req.Request(
+            "http://127.0.0.1:5003/api/update/fr",
+            data=b"",
+            method="POST",
+            headers={"User-Agent": "sneakerbot-admin/1.0"},
+        )
+        with _urllib_req.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read().decode())
+        rebuilt.append(f"update/fr → {body.get('status','ok')}")
+    except Exception as exc:
+        errors.append(f"update/fr: {exc!s:.100}")
+
+    ms = round((_now_ts() - t0) * 1000)
+    return JSONResponse({
+        "status":       "ok" if not errors else "partial",
+        "rebuilt":      rebuilt,
+        "errors":       errors,
+        "elapsed_ms":   ms,
+        "rebuilt_at":   _utcnow_iso(),
+    })
+
+
+@router.post("/api/mission/actions/clear-stuck-jobs")
+def api_mission_clear_stuck_jobs(request: Request) -> JSONResponse:
+    """Tente de vider les jobs bloqués : scheduler reset + cache clear."""
+    from app.app import _is_admin_session
+    if not _is_admin_session(request):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    t0 = _now_ts()
+    cleared: list[str] = []
+    errors: list[str] = []
+
+    # 1. Cache clear
+    try:
+        req = _urllib_req.Request(
+            "http://127.0.0.1:5003/api/cache/clear",
+            data=b"",
+            method="POST",
+            headers={"User-Agent": "sneakerbot-admin/1.0"},
+        )
+        with _urllib_req.urlopen(req, timeout=8) as resp:
+            body = json.loads(resp.read().decode())
+        cleared.append(f"cache clear → {body.get('status','ok')}")
+    except Exception as exc:
+        errors.append(f"cache: {exc!s:.80}")
+
+    # 2. Scheduler status check + restart if stopped
+    try:
+        sched = _scheduler_status()
+        if not sched.get("running"):
+            import importlib
+            try:
+                smod = importlib.import_module("app.scheduler")
+            except Exception:
+                smod = importlib.import_module("scheduler")
+            start_fn = getattr(smod, "start_scheduler", None)
+            if callable(start_fn):
+                start_fn()
+                cleared.append("scheduler redémarré")
+            else:
+                errors.append("start_scheduler non disponible")
+        else:
+            cleared.append("scheduler déjà actif")
+    except Exception as exc:
+        errors.append(f"scheduler: {exc!s:.80}")
+
+    ms = round((_now_ts() - t0) * 1000)
+    return JSONResponse({
+        "status":     "ok" if not errors else "partial",
+        "cleared":    cleared,
+        "errors":     errors,
+        "elapsed_ms": ms,
+        "cleared_at": _utcnow_iso(),
+    })

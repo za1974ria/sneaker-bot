@@ -305,6 +305,34 @@ footer{padding:12px 20px;border-top:1px solid var(--b);display:flex;justify-cont
   <div class="card"><div class="skel"></div></div>
 </div>
 
+<!-- ══ ALL MODULES — full coverage ═══════════════════════════════════════ -->
+<div class="stitle" style="margin-top:4px">
+  All Modules (17)
+  <span style="float:right;display:flex;gap:6px;align-items:center">
+    <span id="mod-summary" style="font-size:10px;color:var(--dim)">—</span>
+    <button class="btn btn-s" style="padding:2px 8px;font-size:9px" onclick="refreshModules()">↺</button>
+  </span>
+</div>
+<div id="mod-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;margin-bottom:4px">
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+</div>
+
+<!-- ── ACTION PANEL ───────────────────────────────── -->
+<div class="stitle">Actions</div>
+<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px">
+  <button class="btn btn-g" onclick="runAction('restart-backend','Redémarrer le backend sneaker_bot ?')">↺ Restart Backend</button>
+  <button class="btn btn-a" onclick="runAction('trust-test','Lancer un smoke test Trust Engine ?')">🧠 Trust Test</button>
+  <button class="btn btn-a" onclick="runAction('force-refresh','Forcer un refresh pricing FR ?')">⚡ Force Refresh</button>
+  <button class="btn btn-s" onclick="runAction('rebuild-csv','Reconstruire les CSV depuis la DB ?')">🔨 Rebuild CSV</button>
+  <button class="btn btn-r" onclick="runAction('clear-stuck-jobs','Vider les jobs bloqués + cache ?')">🧹 Clear Stuck Jobs</button>
+  <button class="btn btn-s" onclick="showConfirm('restart-scheduler')">↺ Restart Scheduler</button>
+  <button class="btn btn-s" onclick="showConfirm('scraper-test')">⚡ Scraper Test</button>
+  <button class="btn btn-s" onclick="testTelegram()">📨 Test Telegram</button>
+</div>
+<div id="action-result" style="font-size:11px;color:var(--dim);margin-bottom:8px;min-height:18px;white-space:pre-wrap"></div>
+
 <!-- ── LIVE LOGS ──────────────────────────────────── -->
 <div class="stitle">
   Live Logs
@@ -825,15 +853,123 @@ function runScraperTest()    { showConfirm('scraper-test'); }
 function restartScheduler()  { showConfirm('restart-scheduler'); }
 function refreshMissionControl() { refreshAll(); }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ALL MODULES PANEL
+// ══════════════════════════════════════════════════════════════════════════════
+
+const MOD_LABELS = {
+  fastapi_backend:     'FastAPI Backend',
+  scheduler:           'Scheduler',
+  celery_worker:       'Celery Worker',
+  pricing_engine:      'Pricing Engine',
+  source_aggregator:   'Source Aggregator',
+  trust_engine:        'Trust Engine',
+  anomaly_detector:    'Anomaly Detector',
+  serpapi_budget:      'SerpAPI Budget',
+  csv_freshness:       'CSV Freshness',
+  access_control_auth: 'Auth / Access Control',
+  subscriptions_db:    'Subscriptions DB',
+  visitor_analytics:   'Visitor Analytics',
+  comparison_api:      'Comparison API',
+  watchdog:            'Watchdog',
+  telegram_alerts:     'Telegram Alerts',
+  nginx:               'Nginx',
+  system_resources:    'System Resources',
+};
+const MOD_ICONS = {
+  fastapi_backend:'🚀', scheduler:'⏱', celery_worker:'⚙️',
+  pricing_engine:'💶', source_aggregator:'🗃', trust_engine:'🧠',
+  anomaly_detector:'🔍', serpapi_budget:'📡', csv_freshness:'📁',
+  access_control_auth:'🔐', subscriptions_db:'🗄', visitor_analytics:'👁',
+  comparison_api:'🔎', watchdog:'🐕', telegram_alerts:'📨',
+  nginx:'🌐', system_resources:'💻',
+};
+
+function renderModules(data) {
+  const mods    = data.modules || {};
+  const summary = data.summary || {};
+  const grid    = $('mod-grid');
+  const sumEl   = $('mod-summary');
+
+  // Summary badge
+  const sc = summary.global_color === 'green' ? 'var(--green)' : summary.global_color === 'orange' ? 'var(--amber)' : 'var(--red)';
+  sumEl.innerHTML = `<span style="color:${sc};font-weight:700">${summary.global_status||'?'}</span>`
+    + ` · <span style="color:var(--green)">${summary.healthy||0} HEALTHY</span>`
+    + ` · <span style="color:var(--amber)">${summary.degraded||0} DEGRADED</span>`
+    + ` · <span style="color:var(--red)">${summary.down||0} DOWN</span>`;
+
+  let h = '';
+  for (const [k, m] of Object.entries(mods)) {
+    const label  = MOD_LABELS[k] || k;
+    const icon   = MOD_ICONS[k]  || '📦';
+    const status = m.status || 'UNKNOWN';
+    const c      = m.color  || 'orange';
+    const cardC  = c === 'green' ? 'green' : c === 'red' ? 'red' : 'orange';
+    const dotC   = c === 'green' ? 'dg'   : c === 'red' ? 'dr' : 'da';
+    const tagC   = c === 'green' ? 'tg'   : c === 'red' ? 'tr' : 'ta';
+    const latency = m.latency_ms != null ? `${m.latency_ms}ms` : '—';
+    const lastAct = m.last_activity ? m.last_activity.substring(0,19).replace('T',' ') : '—';
+    const errCnt  = m.error_count   || 0;
+    const note    = m.note || '';
+    h += `<div class="card ${cardC} glass" style="animation:fi .3s ease">
+      <div class="ch">
+        <span class="ct">${icon} ${label}</span>
+        <span class="${dotC}" style="width:8px;height:8px;border-radius:50%;display:inline-block"></span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:baseline;margin:4px 0">
+        <span class="tag ${tagC}" style="font-size:9px">${status}</span>
+        <span style="color:var(--dim);font-size:10px">${latency}</span>
+        ${errCnt > 0 ? `<span class="tag tr" style="font-size:9px">${errCnt} err</span>` : ''}
+      </div>
+      <div class="cs" style="font-size:10px;color:var(--dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${note}">${note}</div>
+      <div style="font-size:9px;color:var(--dim);margin-top:3px">last: ${lastAct}</div>
+    </div>`;
+  }
+  grid.innerHTML = h || '<div class="card orange"><div class="cs">Aucune donnée</div></div>';
+}
+
+async function refreshModules() {
+  const data = await safeFetchJson('/api/mission/modules');
+  if (!data._err) {
+    renderModules(data);
+  } else {
+    $('mod-grid').innerHTML = `<div class="card red"><div class="cs">Erreur: ${data._err}</div></div>`;
+  }
+}
+
+// ── Generic action runner (for new action buttons) ────────────────────────────
+async function runAction(actionKey, confirmMsg) {
+  if (!confirm(confirmMsg)) return;
+  const resultEl = $('action-result');
+  resultEl.style.color = 'var(--amber)';
+  resultEl.textContent = '⏳ Exécution en cours…';
+  try {
+    const res  = await fetch(`/api/mission/actions/${actionKey}`, { method: 'POST' });
+    const json = await res.json();
+    const ok   = json.status === 'ok' || json.status === 'restarted' || json.status === 'triggered';
+    resultEl.style.color = ok ? 'var(--green)' : 'var(--amber)';
+    const detail = json.message || json.cleared?.join(', ') || json.rebuilt?.join(', ') || '';
+    const errors = json.errors?.length ? ' ⚠ ' + json.errors.join(', ') : '';
+    resultEl.textContent = `[${actionKey}] ${json.status} — ${detail}${errors} (${json.elapsed_ms||0}ms)`;
+    // Refresh module status after any action
+    setTimeout(refreshModules, 2000);
+  } catch(err) {
+    resultEl.style.color = 'var(--red)';
+    resultEl.textContent = `[${actionKey}] Erreur réseau: ${err.message}`;
+  }
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
 // Ordre : refresh critique d'abord, métriques après, logs une seule fois.
 // Telegram : jamais en auto.
 refreshAll();
-setTimeout(refreshMetrics, 2000);       // métriques légèrement différées
-setTimeout(refreshLogs, 3000);          // logs une seule fois au chargement
+setTimeout(refreshMetrics,  2000);      // métriques légèrement différées
+setTimeout(refreshLogs,     3000);      // logs une seule fois au chargement
+setTimeout(refreshModules,  4000);      // modules : après les données critiques
 
-setInterval(refreshAll, 60000);         // cockpit : 60s (pas 30s)
+setInterval(refreshAll,     60000);     // cockpit : 60s
 setInterval(refreshMetrics, 120000);    // métriques : 2 min
+setInterval(refreshModules,  90000);    // modules : 90s (appels lourds)
 // logs : PAS de setInterval — uniquement bouton manuel
 </script>
 </body>

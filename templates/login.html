@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SneakerBot — Connexion</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: #0d0d0d;
+            color: #fff;
+            font-family: system-ui, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .card {
+            background: #111;
+            border: 1px solid #222;
+            border-radius: 12px;
+            padding: 32px;
+            width: 100%;
+            max-width: 380px;
+        }
+        h1 {
+            color: #00ff88;
+            text-align: center;
+            margin-bottom: 8px;
+            font-size: 24px;
+        }
+        p.sub {
+            text-align: center;
+            color: #666;
+            font-size: 13px;
+            margin-bottom: 24px;
+        }
+        label {
+            display: block;
+            color: #aaa;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            background: #1a1a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 15px;
+            margin-bottom: 16px;
+        }
+        input:focus {
+            outline: none;
+            border-color: #00ff88;
+        }
+        .pw-wrapper {
+            position: relative;
+            margin-bottom: 16px;
+        }
+        .pw-wrapper input {
+            margin-bottom: 0;
+            padding-right: 44px;
+        }
+        .pw-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            width: auto;
+            padding: 0;
+            cursor: pointer;
+            color: #555;
+            display: flex;
+            align-items: center;
+            transition: color 0.15s;
+        }
+        .pw-toggle:hover { color: #00ff88; }
+        button {
+            width: 100%;
+            padding: 14px;
+            background: #00ff88;
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .error {
+            background: #ff444422;
+            border: 1px solid #ff4444;
+            color: #ff6666;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 16px;
+            font-size: 13px;
+            text-align: center;
+        }
+        .logo {
+            text-align: center;
+            font-size: 40px;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">👟</div>
+        <h1>SneakerBot</h1>
+        <p class="sub">Connectez-vous à votre espace</p>
+        {% if sales_closed %}
+        <p style="text-align:center;font-size:12px;color:#facc15;margin-bottom:16px;padding:8px;border:1px solid #854d0e;border-radius:8px;background:#1c1917">
+        Accès public fermé : connectez-vous avec un compte client ou admin.</p>
+        {% endif %}
+        {% if error %}
+        <div class="error">❌ {{ error }}</div>
+        {% endif %}
+        <form method="POST" action="/login">
+            <input type="hidden" name="next" value="{{ safe_next }}">
+            <label>Identifiant</label>
+            <input type="text" name="username" placeholder="votre identifiant" autocomplete="username" autocorrect="off" autocapitalize="none" spellcheck="false" required>
+            <label>Mot de passe</label>
+            <div class="pw-wrapper">
+                <input id="pw-input" type="password" name="password" placeholder="votre mot de passe" autocomplete="current-password" required>
+                <button type="button" class="pw-toggle" id="pw-toggle" aria-label="Afficher le mot de passe" onclick="togglePw()">
+                    <svg id="pw-icon-show" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+                    </svg>
+                    <svg id="pw-icon-hide" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>
+                </button>
+            </div>
+            <button type="submit">Se connecter →</button>
+        </form>
+        <p style="text-align:center;margin-top:16px;font-size:12px;color:#444">
+            Pas encore abonné ?
+            <a href="/subscribe" style="color:#00ff88">S'abonner</a>
+        </p>
+    </div>
+    <script>
+        function togglePw() {
+            var input = document.getElementById('pw-input');
+            var toggle = document.getElementById('pw-toggle');
+            var iconShow = document.getElementById('pw-icon-show');
+            var iconHide = document.getElementById('pw-icon-hide');
+            if (input.type === 'password') {
+                input.type = 'text';
+                iconShow.style.display = 'none';
+                iconHide.style.display = '';
+                toggle.setAttribute('aria-label', 'Masquer le mot de passe');
+            } else {
+                input.type = 'password';
+                iconShow.style.display = '';
+                iconHide.style.display = 'none';
+                toggle.setAttribute('aria-label', 'Afficher le mot de passe');
+            }
+        }
+    </script>
+</body>
+</html>

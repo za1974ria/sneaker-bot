@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Visitors</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    body{background:#0d0d0d;color:#fff;font-family:Arial,sans-serif;padding:20px}
+    .wrap{max-width:1100px;margin:0 auto}
+    .cards{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:12px;margin:14px 0}
+    .card{background:#111;border:1px solid #222;border-radius:10px;padding:12px}
+    .v{font-size:1.4rem;font-weight:700;color:#00ff88}
+    .label{font-size:.85rem;color:#9ca3af}
+    .box{background:#111;border:1px solid #222;border-radius:10px;padding:12px;margin-top:12px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid #222;text-align:left;font-size:.88rem}
+    th{color:#93c5fd}
+    .toprow{display:flex;justify-content:space-between;align-items:center;gap:10px}
+    .btn{background:#0f2f1f;border:1px solid #166534;color:#4dff9f;border-radius:8px;padding:7px 10px;text-decoration:none}
+    .country-cell{display:flex;align-items:center;gap:8px}
+    .country-name{display:inline-flex;align-items:center;gap:8px;min-width:150px;color:#f3f4f6}
+    .flag-icon{
+      width:22px;
+      height:16px;
+      border-radius:2px;
+      margin-right:8px;
+      box-shadow:0 0 4px rgba(255,255,255,.08);
+      vertical-align:middle;
+      object-fit:cover;
+      flex:0 0 auto;
+    }
+    .flag-fallback{
+      width:22px;height:16px;display:inline-flex;align-items:center;justify-content:center;
+      margin-right:8px;border-radius:2px;border:1px solid #334155;background:#0f172a;color:#cbd5e1;font-size:.72rem;
+      flex:0 0 auto;
+    }
+    .bar-wrap{flex:1;max-width:220px;height:8px;background:#1f2937;border-radius:999px;overflow:hidden}
+    .bar{height:100%;background:#22c55e}
+  </style>
+</head>
+<body>
+{% include 'partials/admin_topbar.html' %}
+<main class="wrap">
+  <div class="toprow">
+    <h1>Visiteurs</h1>
+    <a class="btn" href="/api/admin/visitors/export.csv">Export CSV</a>
+  </div>
+  <div class="cards">
+    <div class="card"><div class="label">Visiteurs uniques (aujourd'hui)</div><div id="u" class="v">0</div></div>
+    <div class="card"><div class="label">Total visites (aujourd'hui)</div><div id="t" class="v">0</div></div>
+    <div class="card"><div class="label">Pages vues (aujourd'hui)</div><div id="p" class="v">0</div></div>
+  </div>
+
+  <div class="box">
+    <h3>Dernières 20 visites</h3>
+    <table>
+      <thead><tr><th>Heure</th><th>IP</th><th>Pays</th><th>Page</th><th>User-agent</th></tr></thead>
+      <tbody id="last"><tr><td colspan="5">Chargement...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="box">
+    <h3>Top pages (24h)</h3>
+    <table><thead><tr><th>Page</th><th>Vues</th></tr></thead><tbody id="pages"></tbody></table>
+  </div>
+
+  <div class="box">
+    <h3>🌍 Pays visiteurs (7 derniers jours)</h3>
+    <table><thead><tr><th>Pays</th><th>Total visites</th><th>Visiteurs uniques</th></tr></thead><tbody id="countries"></tbody></table>
+  </div>
+</main>
+<script>
+async function refreshVisitors(){
+  try{
+    const countryCode = (name) => {
+      const n = String(name||'').trim().toLowerCase();
+      const map = {
+        'algeria':'dz','algérie':'dz',
+        'united states':'us','usa':'us','états-unis':'us','etats-unis':'us',
+        'france':'fr',
+        'the netherlands':'nl','netherlands':'nl','pays-bas':'nl',
+        'singapore':'sg',
+        'germany':'de','allemagne':'de',
+        'japan':'jp','japon':'jp',
+        'sweden':'se','suède':'se','suede':'se',
+        'china':'cn','chine':'cn',
+        'united kingdom':'gb','uk':'gb','royaume-uni':'gb',
+        'russia':'ru','russie':'ru'
+      };
+      return map[n] || '';
+    };
+    const renderCountry = (name) => {
+      const label = String(name || 'Inconnu');
+      const code = countryCode(label);
+      if (code) {
+        const src = `https://flagcdn.com/24x18/${code}.png`;
+        return `<span class="country-name"><img class="flag-icon" src="${src}" alt="${label}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><span>${label}</span></span>`;
+      }
+      return `<span class="country-name"><span class="flag-fallback">◎</span><span>${label}</span></span>`;
+    };
+
+    const r = await fetch('/api/admin/visitors/summary', {cache:'no-store'});
+    if(!r.ok) return;
+    const d = await r.json();
+    document.getElementById('u').textContent = String((d.today||{}).unique_visitors||0);
+    document.getElementById('t').textContent = String((d.today||{}).total_visits||0);
+    document.getElementById('p').textContent = String((d.today||{}).page_views||0);
+    const last = (d.latest_visits||[]).map(x=>`<tr><td>${x.time||''}</td><td>${x.ip||''}</td><td>${renderCountry(x.country)}</td><td>${x.path||''}</td><td>${x.user_agent||''}</td></tr>`).join('');
+    document.getElementById('last').innerHTML = last || '<tr><td colspan="5">Aucune donnée</td></tr>';
+    const pages = (d.top_pages_24h||[]).map(x=>`<tr><td>${x.path||''}</td><td>${x.count||0}</td></tr>`).join('');
+    document.getElementById('pages').innerHTML = pages || '<tr><td colspan="2">Aucune donnée</td></tr>';
+    const cArr = (d.top_countries_7d||[]);
+    const maxC = Math.max(1, ...cArr.map(x=>Number(x.count||0)));
+    const countries = cArr.map(x=>{
+      const n = Number(x.count||0);
+      const u = Number(x.unique_visitors||0);
+      const w = Math.max(2, Math.round((n/maxC)*100));
+      return `<tr><td><div class="country-cell">${renderCountry(x.country)}<div class="bar-wrap"><div class="bar" style="width:${w}%"></div></div></div></td><td>${n}</td><td>${u}</td></tr>`;
+    }).join('');
+    document.getElementById('countries').innerHTML = countries || '<tr><td colspan="3">Aucune donnée</td></tr>';
+  }catch(_e){}
+}
+refreshVisitors();
+setInterval(refreshVisitors, 15000);
+</script>
+</body>
+</html>

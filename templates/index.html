@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SneakerBot — Dashboard prix FR</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
   <style>
     :root {
       --bg: #0d0d0d;
@@ -205,6 +206,48 @@
     table.sources-mini th, table.sources-mini td { padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--border); text-align: left; }
     td.conf-cell { white-space: nowrap; font-size: 0.82rem; }
     td.conf-cell small { color: var(--muted); font-weight: 600; }
+    /* Sources badge */
+    .src-badge {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.2rem 0.55rem; border-radius: 999px; font-size: 0.75rem; font-weight: 700;
+      cursor: pointer; border: 1px solid transparent; white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .src-badge:hover { opacity: 0.8; }
+    .src-badge.sb-high   { background: rgba(34,197,94,0.15);  color: #22c55e; border-color: rgba(34,197,94,0.3); }
+    .src-badge.sb-medium { background: rgba(249,115,22,0.15); color: #f97316; border-color: rgba(249,115,22,0.3); }
+    .src-badge.sb-low    { background: rgba(239,68,68,0.15);  color: #ef4444; border-color: rgba(239,68,68,0.3); }
+    .src-badge.sb-none   { background: rgba(107,114,128,0.15);color: #6b7280; border-color: rgba(107,114,128,0.3); }
+    @media (max-width: 768px) {
+      .wrap { padding: 0.75rem 0.85rem 1.5rem; }
+      .brand-block h1 { font-size: 1.2rem; }
+      .header-exports { justify-content: flex-start; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 0.55rem; }
+      .stat-card .value { font-size: 1.1rem; }
+      .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      table.data { font-size: 0.8rem; }
+      table.data th, table.data td { padding: 0.5rem 0.6rem; }
+    }
+    @media (max-width: 375px) { .src-badge { font-size: 0.7rem; padding: 0.18rem 0.4rem; } }
+    /* Badges OR / ARGENT / BRONZE */
+    .tier-badge {
+      display: inline-block; padding: 0.15rem 0.45rem; border-radius: 4px;
+      font-size: 0.68rem; font-weight: 800; letter-spacing: 0.04em;
+      vertical-align: middle; margin-left: 0.35rem; white-space: nowrap;
+    }
+    .tier-or     { background: linear-gradient(135deg,#b8860b,#ffd700); color: #1a0e00; border: 1px solid #c9a000; }
+    .tier-argent { background: linear-gradient(135deg,#7a8591,#c0c8d0); color: #0d1117; border: 1px solid #a0aab4; }
+    .tier-bronze { background: linear-gradient(135deg,#6b3a2a,#cd7f32); color: #fff0e6; border: 1px solid #9a5c2a; }
+    /* Badge stabilité marché */
+    .stab-badge {
+      display: inline-block; padding: 0.12rem 0.38rem; border-radius: 3px;
+      font-size: 0.63rem; font-weight: 700; letter-spacing: 0.03em;
+      vertical-align: middle; margin-left: 0.25rem; white-space: nowrap;
+    }
+    .stab-fiable   { background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid rgba(0,255,136,0.35); }
+    .stab-stable   { background: rgba(34,197,94,0.12);  color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+    .stab-variable { background: rgba(249,115,22,0.12); color: #fb923c; border: 1px solid rgba(249,115,22,0.3); }
+    .stab-instable { background: rgba(239,68,68,0.15);  color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
     /* Toast */
     .toast-wrap { position: fixed; bottom: 1.25rem; right: 1.25rem; z-index: 200; display: flex; flex-direction: column; gap: 0.5rem; max-width: min(360px, 92vw); }
     .toast {
@@ -249,6 +292,9 @@
       position: absolute;
       top: 75px;
     }
+    /* Colonnes masquées : Google (8) et Sources (11) */
+    th:nth-child(8), td:nth-child(8),
+    th:nth-child(11), td:nth-child(11) { display: none; }
   </style>
 </head>
 <body>
@@ -287,7 +333,7 @@
         <div class="value" id="statLastUp" style="font-size:1rem;">—</div>
       </div>
       <div class="stat-card">
-        <div class="label">Prix moyen global</div>
+        <div class="label">Moyenne estimée (marché)</div>
         <div class="value" id="statAvg">—</div>
       </div>
       <div class="stat-card">
@@ -333,8 +379,8 @@
         <label for="sortSelect">Trier par</label>
         <select id="sortSelect">
           <option value="name-asc">Nom A → Z</option>
-          <option value="price-asc">Prix moyen croissant</option>
-          <option value="price-desc">Prix moyen décroissant</option>
+          <option value="price-asc">Moyenne estimée croissante</option>
+          <option value="price-desc">Moyenne estimée décroissante</option>
         </select>
       </div>
       <div class="field" style="flex:0; min-width:auto;">
@@ -343,16 +389,22 @@
       </div>
     </section>
 
+    <div id="product-info" style="margin-top:10px; display:none;">
+      <img id="product-image" style="width:120px; display:block;" alt="">
+      <div id="product-name"></div>
+      <div id="product-ref"></div>
+    </div>
+
     <div class="table-wrap">
       <div id="tableLoader" class="table-loader"><div class="spinner" aria-hidden="true"></div></div>
-      <table class="data" aria-label="Prix sneakers">
+      <table class="data" aria-label="Estimations sneakers">
         <thead>
           <tr>
             <th>Marque</th>
             <th>Modèle</th>
-            <th>Prix min</th>
-            <th>Prix moy.</th>
-            <th>Prix max</th>
+            <th>Est. min</th>
+            <th>Est. moy.</th>
+            <th>Est. max</th>
             <th>Sources</th>
             <th>Màj</th>
             <th>Confiance</th>
@@ -389,7 +441,7 @@
   <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal">
       <div class="modal-head">
-        <h3 id="modalTitle">Détail</h3>
+        <h3 id="modalTitle">Détail</h3><span id="modalTierBadge"></span>
         <button type="button" class="close-x" id="modalClose" aria-label="Fermer">×</button>
       </div>
       <div class="modal-body" id="modalBody"></div>
@@ -631,6 +683,299 @@
     return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 2 }).format(x);
   }
 
+  function getSafePriceTriplet(item) {
+    const priceMin = Number(String(item && item.price_min != null ? item.price_min : '').replace(',', '.'));
+    const priceAvg = Number(String(item && item.price_avg != null ? item.price_avg : '').replace(',', '.'));
+    const priceMax = Number(String(item && item.price_max != null ? item.price_max : '').replace(',', '.'));
+    const safeMin = Number.isFinite(priceMin) ? priceMin : 0;
+    const safeAvg = Number.isFinite(priceAvg) ? priceAvg : safeMin;
+    const safeMax = Number.isFinite(priceMax) ? priceMax : safeAvg;
+    return { safeMin: safeMin, safeAvg: safeAvg, safeMax: safeMax };
+  }
+
+  var MS_PER_24H = 24 * 60 * 60 * 1000;
+
+  function parseTimestampMs(ts) {
+    if (ts == null || ts === '') return null;
+    var s = String(ts).trim();
+    var normalized = s.indexOf('T') >= 0 ? s : s.replace(' ', 'T');
+    var ms = Date.parse(normalized);
+    if (Number.isNaN(ms)) return null;
+    return ms;
+  }
+
+  function isTimestampStale(tsMs, nowMs) {
+    if (tsMs == null) return false;
+    return (nowMs - tsMs) > MS_PER_24H;
+  }
+
+  function toValidPrice(p) {
+    if (p == null || p === '') return null;
+    var v = Number(String(p).replace(',', '.'));
+    if (Number.isNaN(v) || v <= 0) return null;
+    return v;
+  }
+
+  function trimTenPercentSorted(sortedAsc) {
+    var a = sortedAsc.slice();
+    var n = a.length;
+    if (n === 0) return [];
+    var k = Math.floor(n * 0.1);
+    if (2 * k >= n) return a.slice();
+    return a.slice(k, n - k);
+  }
+
+  function medianFromSorted(sortedAsc) {
+    var a = sortedAsc;
+    var n = a.length;
+    if (n === 0) return null;
+    var mid = Math.floor(n / 2);
+    if (n % 2 === 1) return a[mid];
+    return (a[mid - 1] + a[mid]) / 2;
+  }
+
+  function coherenceReliabilityLabel(prices) {
+    if (!prices || prices.length < 2) return 'Faible';
+    var n = prices.length;
+    var sum = 0;
+    var i;
+    for (i = 0; i < n; i++) sum += prices[i];
+    var mean = sum / n;
+    if (mean <= 0) return 'Faible';
+    var varSum = 0;
+    for (i = 0; i < n; i++) {
+      var d = prices[i] - mean;
+      varSum += d * d;
+    }
+    var std = Math.sqrt(varSum / n);
+    var cv = std / mean;
+    if (cv < 0.12) return 'Fiable';
+    if (cv < 0.30) return 'Moyen';
+    return 'Faible';
+  }
+
+  function downgradeReliabilityLabel(label) {
+    if (label === 'Fiable') return 'Moyen';
+    if (label === 'Moyen') return 'Faible';
+    return 'Faible';
+  }
+
+  function reliabilityLabelToColor(label) {
+    if (label === 'Fiable') return 'green';
+    if (label === 'Moyen') return 'orange';
+    return 'red';
+  }
+
+  function reliabilityEmoji(color) {
+    if (color === 'green') return '🟢';
+    if (color === 'orange') return '🟡';
+    return '🔴';
+  }
+
+  function formatEstimateEuroText(value) {
+    if (value == null || Number.isNaN(value)) return 'Estimation indisponible';
+    var x = Number(value);
+    var str = (Math.abs(x - Math.round(x)) < 1e-9) ? String(Math.round(x)) : x.toFixed(2).replace('.', ',');
+    return 'Estimation marché : ' + str + '€';
+  }
+
+  function sourcesSummaryLine(count) {
+    if (count != null && count > 0) {
+      return 'Basé sur ' + count + ' source' + (count > 1 ? 's' : '');
+    }
+    return 'Sources non disponibles';
+  }
+
+  function collectListEntries(row, nowMs) {
+    var entries = [];
+    if (!row || typeof row !== 'object') return entries;
+    var tsm = parseTimestampMs(row.updated_at);
+    if (isTimestampStale(tsm, nowMs)) return entries;
+    var triple = [row.price_min, row.price_avg, row.price_max];
+    var j;
+    for (j = 0; j < triple.length; j++) {
+      var pv = toValidPrice(triple[j]);
+      if (pv != null) entries.push({ price: pv, hasTs: tsm != null });
+    }
+    return entries;
+  }
+
+  function collectDetailEntries(d, nowMs) {
+    var agg = (d && d.aggregated) ? d.aggregated : {};
+    var srcs = (d && Array.isArray(d.sources)) ? d.sources : [];
+    var entries = [];
+    var i;
+    var s;
+    var shop;
+    var tsm;
+    var p;
+    for (i = 0; i < srcs.length; i++) {
+      s = srcs[i];
+      shop = String(s.shop || '').trim();
+      if (shop === 'Agrege FR') continue;
+      tsm = parseTimestampMs(s.updated_at);
+      if (isTimestampStale(tsm, nowMs)) continue;
+      p = toValidPrice(s.price_avg);
+      if (p == null) continue;
+      entries.push({ price: p, hasTs: tsm != null });
+    }
+    if (entries.length === 0) {
+      tsm = parseTimestampMs(agg.updated_at);
+      if (!isTimestampStale(tsm, nowMs)) {
+        var triple = [agg.price_min, agg.price_avg, agg.price_max];
+        for (i = 0; i < triple.length; i++) {
+          p = toValidPrice(triple[i]);
+          if (p != null) entries.push({ price: p, hasTs: tsm != null });
+        }
+      }
+    }
+    return entries;
+  }
+
+  function countSourcesForDisplayList(row) {
+    if (!row || typeof row !== 'object') return 0;
+    var sc = row.source_count != null ? Number(row.source_count) : NaN;
+    if (!Number.isNaN(sc) && sc >= 0) return sc;
+    var nb = row.nb_sources != null ? Number(row.nb_sources) : NaN;
+    if (!Number.isNaN(nb) && nb >= 0) return nb;
+    if (Array.isArray(row.sources)) return row.sources.length;
+    return 0;
+  }
+
+  function countSourcesForDisplayDetail(d) {
+    if (!d || typeof d !== 'object') return 0;
+    var sc = d.sources_count != null ? Number(d.sources_count) : NaN;
+    if (!Number.isNaN(sc) && sc >= 0) return sc;
+    if (Array.isArray(d.sources)) return d.sources.length;
+    if (d.aggregated && d.aggregated.nb_sources != null) {
+      var n = Number(d.aggregated.nb_sources);
+      if (!Number.isNaN(n) && n >= 0) return n;
+    }
+    return 0;
+  }
+
+  /**
+   * Couche pure avant affichage : trim 10 %, médiane, fraîcheur 24 h, cohérence (CV), fallbacks.
+   * @param {'list'|'detail'} mode
+   */
+  function buildSneakerDisplayContext(payload, mode, nowMs) {
+    var now = nowMs != null ? nowMs : Date.now();
+    var entries = mode === 'list' ? collectListEntries(payload, now) : collectDetailEntries(payload, now);
+    var contributingSources = mode === 'list' ? countSourcesForDisplayList(payload) : countSourcesForDisplayDetail(payload);
+
+    var missingTs = false;
+    var rawPrices = [];
+    var i;
+    for (i = 0; i < entries.length; i++) {
+      rawPrices.push(entries[i].price);
+      if (!entries[i].hasTs) missingTs = true;
+    }
+
+    if (rawPrices.length === 0) {
+      return {
+        estimateText: 'Estimation indisponible',
+        estimateValue: null,
+        reliabilityLabel: 'Faible',
+        reliabilityColor: 'red',
+        sourcesLine: 'Sources non disponibles',
+        sourceCount: contributingSources,
+        missingTimestampFlag: missingTs
+      };
+    }
+
+    var sorted = rawPrices.slice().sort(function (a, b) { return a - b; });
+    var trimmed = trimTenPercentSorted(sorted);
+    var med = medianFromSorted(trimmed);
+    if (med == null || Number.isNaN(med)) {
+      return {
+        estimateText: 'Estimation indisponible',
+        estimateValue: null,
+        reliabilityLabel: 'Faible',
+        reliabilityColor: 'red',
+        sourcesLine: 'Sources non disponibles',
+        sourceCount: contributingSources,
+        missingTimestampFlag: missingTs
+      };
+    }
+
+    var cohLabel = coherenceReliabilityLabel(trimmed);
+    var lab = cohLabel;
+    if (missingTs) lab = downgradeReliabilityLabel(lab);
+    if (contributingSources < 3) lab = 'Faible';
+
+    return {
+      estimateText: formatEstimateEuroText(med),
+      estimateValue: med,
+      reliabilityLabel: lab,
+      reliabilityColor: reliabilityLabelToColor(lab),
+      sourcesLine: sourcesSummaryLine(contributingSources > 0 ? contributingSources : null),
+      sourceCount: contributingSources,
+      missingTimestampFlag: missingTs
+    };
+  }
+
+  function renderCredibilityStackFromContext(ctx, compact) {
+    var em = reliabilityEmoji(ctx.reliabilityColor);
+    var fs = compact ? '0.72rem' : '0.85rem';
+    var mt = compact ? '0.2rem' : '0.35rem';
+    return '<div style="font-size:' + fs + ';line-height:1.45;color:var(--muted);margin-top:' + mt + ';">' +
+      em + ' ' + escapeHtml(ctx.reliabilityLabel) + '<br>' +
+      escapeHtml(ctx.sourcesLine) +
+      '</div>';
+  }
+
+  function renderAnomalyDetail(item) {
+    var stab = item.market_stability || '';
+    var q1 = item.price_q1 || '';
+    var q3 = item.price_q3 || '';
+    var lo = item.outliers_low || '0';
+    var hi = item.outliers_high || '0';
+    var flags = item.anomaly_flags || '';
+    var score = item.anomaly_score != null ? item.anomaly_score : '';
+    if (!stab && !q1) return '';
+    var stabColors = { fiable: '#00ff88', stable: '#4ade80', variable: '#fb923c', instable: '#f87171' };
+    var stabColor = stabColors[stab] || '#888';
+    var stabLabel = stab === 'fiable' ? '✓ Données fiables' : stab === 'stable' ? 'Marché stable' : stab === 'variable' ? 'Marché variable' : stab === 'instable' ? '⚠ Marché instable' : stab;
+    var flagList = flags ? flags.split(',').map(function(f) { return '<li>' + escapeHtml(f.trim()) + '</li>'; }).join('') : '<li style="color:var(--muted)">Aucune anomalie détectée</li>';
+    var priceRange = (q1 && q3 && q1 !== q3)
+      ? formatEuro(q1) + ' → ' + formatEuro(q3)
+      : (q1 ? formatEuro(q1) : '—');
+    return '<div style="margin-top:0.75rem;padding:0.6rem 0.8rem;border-radius:8px;background:rgba(255,255,255,0.04);border:1px solid var(--border)">' +
+      '<p style="margin:0 0 0.35rem;font-size:0.82rem;font-weight:700;color:' + stabColor + '">' + escapeHtml(stabLabel) + '  <small style="font-weight:400;color:var(--muted)">Score anomalie : ' + (score !== '' ? score + '/10' : '—') + '</small></p>' +
+      '<p style="margin:0 0 0.4rem;font-size:0.8rem;color:var(--muted)">Prix fiable (Q1→Q3) : <strong style="color:var(--text)">' + priceRange + '</strong>' +
+      '  |  Outliers bas : <strong>' + escapeHtml(String(lo)) + '</strong>  |  Outliers haut : <strong>' + escapeHtml(String(hi)) + '</strong></p>' +
+      '<ul style="margin:0;padding-left:1.1rem;font-size:0.75rem;color:var(--muted)">' + flagList + '</ul>' +
+      '</div>';
+  }
+
+  function renderStabilityBadge(row) {
+    var stab = row.market_stability || '';
+    if (!stab) return '';
+    var cls = 'stab-' + stab;
+    var labels = { fiable: '✓ Fiable', stable: 'Stable', variable: 'Variable', instable: '⚠ Instable' };
+    var tips = {
+      fiable:   'Données fiables — spread serré, aucun outlier',
+      stable:   'Marché stable',
+      variable: 'Marché variable — prix dispersés',
+      instable: 'Marché instable — nombreux outliers détectés'
+    };
+    var lo = row.outliers_low || '0';
+    var hi = row.outliers_high || '0';
+    var flags = row.anomaly_flags || '';
+    var tip = (tips[stab] || stab);
+    if (lo !== '0' || hi !== '0') tip += ' (bas:' + lo + ' haut:' + hi + ')';
+    if (flags) tip += ' | ' + flags;
+    return '<span class="stab-badge ' + cls + '" title="' + escapeAttr(tip) + '">' + (labels[stab] || stab) + '</span>';
+  }
+
+  function renderTierBadge(row) {
+    var tier = row.tier_badge || '';
+    if (!tier) return '';
+    var cls = tier === 'OR' ? 'tier-or' : (tier === 'ARGENT' ? 'tier-argent' : 'tier-bronze');
+    var tips = { OR: 'Modèle TOP 30 — traitement premium', ARGENT: 'Données fiables (score ≥ 80)', BRONZE: 'Données correctes' };
+    return '<span class="tier-badge ' + cls + '" title="' + (tips[tier] || tier) + '">' + tier + '</span>';
+  }
+
   function renderConfidence(conf) {
     if (!conf) return '<span style="color:#666">—</span>';
     const stars = '★'.repeat(conf.stars) + '☆'.repeat(5 - conf.stars);
@@ -648,6 +993,21 @@
     const tip = tipParts.join(' | ');
     return '<span style="color:' + color + '" title="' + escapeAttr(tip) + '">' +
       stars + ' <small>' + conf.score + '/100</small></span>';
+  }
+
+  function renderSourcesBadge(row) {
+    const count = row.source_count != null ? Number(row.source_count) : 0;
+    const conf  = row.price_confidence || 'none';
+    const preview = Array.isArray(row.sources_preview) ? row.sources_preview : [];
+    const cls   = 'src-badge sb-' + conf;
+    const icons = { high: '●', medium: '●', low: '●', none: '○' };
+    const icon  = icons[conf] || '○';
+    const label = count === 0 ? 'Aucune source' : count + ' source' + (count > 1 ? 's' : '');
+    const tip   = preview.length ? preview.join(', ') : (count === 0 ? 'Données indisponibles' : 'Source inconnue');
+    return '<span class="' + cls + '" title="' + escapeAttr(tip) + '" ' +
+           'data-sources=\'' + escapeAttr(JSON.stringify(preview)) + '\' ' +
+           'data-confidence="' + escapeAttr(conf) + '">' +
+           icon + ' ' + label + '</span>';
   }
 
   function renderConfidenceDetail(conf) {
@@ -833,15 +1193,19 @@
     pageRows.forEach(function (row) {
       const tr = document.createElement('tr');
       tr.dataset.modelId = row.model_id;
+      var disp = buildSneakerDisplayContext(row, 'list');
+      var safePrices = getSafePriceTriplet(row);
+      var priceCells =
+        '<td class="price">' + formatEuro(safePrices.safeMin) + '</td>' +
+        '<td class="price">' + formatEuro(safePrices.safeAvg) + renderCredibilityStackFromContext(disp, true) + '</td>' +
+        '<td class="price">' + formatEuro(safePrices.safeMax) + '</td>';
       tr.innerHTML =
         '<td>' + escapeHtml(row.brand) + '</td>' +
-        '<td>' + escapeHtml(cleanModelName(row.brand, row.model)) + '</td>' +
-        '<td class="price">' + formatEuro(row.price_min) + '</td>' +
-        '<td class="price">' + formatEuro(row.price_avg) + '</td>' +
-        '<td class="price">' + formatEuro(row.price_max) + '</td>' +
-        '<td class="src-cell" data-mid="' + escapeAttr(encodeURIComponent(row.model_id)) + '"><span class="muted">…</span></td>' +
+        '<td>' + escapeHtml(cleanModelName(row.brand, row.model)) + renderTierBadge(row) + '</td>' +
+        priceCells +
+        '<td>' + renderSourcesBadge(row) + '</td>' +
         '<td>' + escapeHtml(row.updated_at || '—') + '</td>' +
-        '<td class="conf-cell">' + renderConfidence(row.confidence) + '</td>';
+        '<td class="conf-cell">' + renderConfidence(row.confidence) + renderStabilityBadge(row) + '</td>';
       tr.addEventListener('click', function () { openModal(row.model_id); });
       tbody.appendChild(tr);
     });
@@ -891,19 +1255,29 @@
     return escapeHtml(s).replace(/'/g, '&#39;');
   }
 
-  async function loadSourceCountsForPage() {
-    const cells = document.querySelectorAll('td.src-cell[data-mid]');
-    const jobs = Array.prototype.map.call(cells, function (td) {
-      const raw = td.getAttribute('data-mid');
-      if (!raw) return Promise.resolve();
-      let mid;
-      try { mid = decodeURIComponent(raw); } catch (e) { mid = raw; }
-      const enc = encodeURIComponent(mid);
-      return fetchJson('/api/sneakers/' + enc).then(function (d) {
-        td.textContent = d.sources_count != null ? String(d.sources_count) : '0';
-      }).catch(function () { td.textContent = '—'; });
-    });
-    await Promise.all(jobs);
+  function loadSourceCountsForPage() { /* remplacé par renderSourcesBadge inline */ }
+
+  function openSourcesModal(btn) {
+    if (!btn) return;
+    let shops = [];
+    try { shops = JSON.parse(btn.getAttribute('data-sources') || '[]'); } catch (e) {}
+    const conf = btn.getAttribute('data-confidence') || 'none';
+    const confLabels = { high: 'Élevée (≥3 sources)', medium: 'Moyenne (2 sources)', low: 'Faible (1 source)', none: 'Aucune' };
+    let body = '<p style="margin:0 0 0.75rem;font-size:0.85rem;color:var(--muted)">Confiance : <strong style="color:' +
+      ({high:'#22c55e',medium:'#f97316',low:'#ef4444',none:'#6b7280'}[conf]||'#6b7280') + '">' +
+      escapeHtml(confLabels[conf] || conf) + '</strong></p>';
+    if (shops.length) {
+      body += '<ul style="margin:0;padding:0 0 0 1.1rem;font-size:0.9rem;line-height:1.8">' +
+        shops.map(function(s){ return '<li>' + escapeHtml(s) + '</li>'; }).join('') + '</ul>';
+    } else {
+      body += '<p style="color:var(--muted);font-size:0.9rem">Données indisponibles pour ce modèle.</p>';
+    }
+    document.getElementById('sources-modal-title').textContent = 'Sources de prix';
+    document.getElementById('sources-modal-body').innerHTML = body;
+    document.getElementById('sources-modal-overlay').classList.add('open');
+  }
+  function closeSourcesModal() {
+    document.getElementById('sources-modal-overlay').classList.remove('open');
   }
 
   function openHistoryModal(modelId) {
@@ -943,7 +1317,12 @@
 
     var svgChart = '<p style="color:#666;font-size:13px">Pas assez de données pour le graphique (min. 2 snapshots)</p>';
     if (points.length >= 2) {
-      var prices = points.map(function (p) { return Number(p.price_avg); });
+      var prices = points.map(function (p) {
+        var av = Number(p.price_avg);
+        if (Number.isFinite(av)) return av;
+        var mn = Number(p.price_min);
+        return Number.isFinite(mn) ? mn : 0;
+      });
       var minP = Math.min.apply(null, prices);
       var maxP = Math.max.apply(null, prices);
       var range = (maxP - minP) || 1;
@@ -1001,13 +1380,16 @@
       const agg = d.aggregated || {};
       const title = (d.brand || '') + ' — ' + (d.model || '');
       document.getElementById('modalTitle').textContent = title;
+      var tierEl = document.getElementById('modalTierBadge');
+      if (tierEl) tierEl.innerHTML = renderTierBadge(d);
 
       let srcHtml = '<table class="sources-mini"><thead><tr><th>Site</th><th>Min</th><th>Moy.</th><th>Max</th><th>N</th></tr></thead><tbody>';
       (d.sources || []).forEach(function (s) {
+        var sourceSafePrices = getSafePriceTriplet(s);
         srcHtml += '<tr><td>' + escapeHtml(s.shop || '—') + '</td>' +
-          '<td class="price">' + formatEuro(s.price_min) + '</td>' +
-          '<td class="price">' + formatEuro(s.price_avg) + '</td>' +
-          '<td class="price">' + formatEuro(s.price_max) + '</td>' +
+          '<td class="price">' + formatEuro(sourceSafePrices.safeMin) + '</td>' +
+          '<td class="price">' + formatEuro(sourceSafePrices.safeAvg) + '</td>' +
+          '<td class="price">' + formatEuro(sourceSafePrices.safeMax) + '</td>' +
           '<td>' + escapeHtml(String(s.price_count || '')) + '</td></tr>';
       });
       if (!(d.sources || []).length) {
@@ -1015,14 +1397,20 @@
       }
       srcHtml += '</tbody></table>';
 
-      document.getElementById('modalBody').innerHTML =
-        '<p style="margin:0 0 0.5rem;color:var(--muted);font-size:0.88rem;">Marché ' + escapeHtml(String(agg.market || 'FR')) + '</p>' +
+      var dispDetail = buildSneakerDisplayContext(d, 'detail');
+      var aggSafePrices = getSafePriceTriplet(agg);
+      var highlightBlock =
         '<div class="highlight-prices">' +
-        '<div class="hp"><div class="lbl">Min</div><div class="num">' + formatEuro(agg.price_min) + '</div></div>' +
-        '<div class="hp"><div class="lbl">Moyenne</div><div class="num">' + formatEuro(agg.price_avg) + '</div></div>' +
-        '<div class="hp"><div class="lbl">Max</div><div class="num">' + formatEuro(agg.price_max) + '</div></div>' +
-        '</div>' +
+        '<div class="hp"><div class="lbl">Min</div><div class="num">' + formatEuro(aggSafePrices.safeMin) + '</div></div>' +
+        '<div class="hp"><div class="lbl">Moyen</div><div class="num">' + formatEuro(aggSafePrices.safeAvg) + '</div></div>' +
+        '<div class="hp"><div class="lbl">Max</div><div class="num">' + formatEuro(aggSafePrices.safeMax) + '</div></div>' +
+        '</div>';
+      document.getElementById('modalBody').innerHTML =
+        '<p style="margin:0 0 0.5rem;color:var(--muted);font-size:0.88rem;">Marché ' + escapeHtml(String(agg.market != null ? agg.market : 'FR')) + '</p>' +
+        highlightBlock +
+        renderCredibilityStackFromContext(dispDetail, false) +
         renderConfidenceDetail(d.confidence) +
+        renderAnomalyDetail(d) +
         '<button type="button" id="btn-open-history" class="modal-history-cta">📊 Voir historique des prix</button>' +
         '<h4 style="margin:1rem 0 0.35rem;font-size:0.85rem;color:var(--accent);">Sources de prix</h4>' +
         '<p style="margin:0 0 0.5rem;font-size:0.78rem;color:var(--muted);">Pas d’URL produit dans les données agrégées — colonne site uniquement.</p>' +
@@ -1236,8 +1624,37 @@
     setInterval(function () { loadAlertsCount(); }, 120000);
   }
 
+  // Sources badge click — délégation sur le tbody
+  document.getElementById('tableBody').addEventListener('click', function (e) {
+    var btn = e.target.closest('.src-badge');
+    if (btn) { e.stopPropagation(); openSourcesModal(btn); }
+  });
+
+  (function () {
+    var o = document.getElementById('sources-modal-overlay');
+    if (!o) return;
+    document.getElementById('sources-modal-close').addEventListener('click', closeSourcesModal);
+    o.addEventListener('click', function (e) { if (e.target === o) closeSourcesModal(); });
+  })();
+
   init();
 })();
   </script>
+
+<!-- Modal Sources -->
+<div id="sources-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:300;align-items:center;justify-content:center;padding:1rem;">
+  <div style="background:var(--bg-elev);border:1px solid var(--border);border-radius:var(--radius);padding:1.5rem;max-width:380px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">
+      <h3 id="sources-modal-title" style="margin:0;font-size:1rem;font-weight:800;">Sources de prix</h3>
+      <button id="sources-modal-close" class="modal .close-x" style="background:none;border:none;color:var(--muted);font-size:1.4rem;cursor:pointer;line-height:1;padding:0;">×</button>
+    </div>
+    <div id="sources-modal-body"></div>
+  </div>
+</div>
+<style>
+  #sources-modal-overlay { display: none; }
+  #sources-modal-overlay.open { display: flex; }
+</style>
+  <script src="/static/product_display.js"></script>
 </body>
 </html>

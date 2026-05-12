@@ -1,6 +1,7 @@
 """
 Score de confiance par modèle sneaker — SneakerBot
 Score de 0 à 100 basé sur 5 critères pondérés (+ bonus optionnel Claude 0–5 sur fiche détail API).
+TOP 30 : bonus +10 pts si modèle premium bien alimenté (≥ 5 sources).
 """
 
 from __future__ import annotations
@@ -20,6 +21,11 @@ def compute_confidence_score(
     claude_points: Optional[int] = None,
     brand: Optional[str] = None,
     model: Optional[str] = None,
+    # ── Nouveaux paramètres moteur premium ──────────────────────────────────
+    serpapi_validated: bool = False,      # SerpAPI a validé ce modèle
+    suspect_min: bool = False,            # prix minimum suspect vs médiane
+    source_diversity: int = 1,            # nombre de boutiques distinctes
+    data_age_hours: Optional[float] = None,  # âge explicite en heures (priorité sur updated_at)
 ) -> dict[str, Any]:
     """
     Calcule un score de confiance 0-100 pour un modèle sneaker.
@@ -46,6 +52,7 @@ def compute_confidence_score(
         scores["nb_sources"] = 8
 
     # ── CRITÈRE 2 : Cohérence des prix (25 pts max) ───────────────────────
+    spread_pct = 0.0
     if price_avg > 0:
         spread_pct = (price_max - price_min) / price_avg * 100
         if spread_pct <= 15:
@@ -56,14 +63,18 @@ def compute_confidence_score(
             scores["price_coherence"] = 10
         elif spread_pct <= 80:
             scores["price_coherence"] = 5
-        else:
+        elif spread_pct <= 150:
             scores["price_coherence"] = 2
+        else:
+            # Spread extrême (>150%) : signal fort d'incohérence
+            scores["price_coherence"] = 0
     else:
         scores["price_coherence"] = 0
 
     # ── CRITÈRE 3 : Fraîcheur des données (20 pts max) ────────────────────
+    _age_hours: Optional[float] = data_age_hours  # priorité au paramètre explicite
     scores["freshness"] = 5
-    if updated_at:
+    if _age_hours is None and updated_at:
         try:
             if isinstance(updated_at, str):
                 ts = updated_at.replace("Z", "+00:00")
@@ -72,21 +83,23 @@ def compute_confidence_score(
                     dt = dt.replace(tzinfo=timezone.utc)
             else:
                 dt = updated_at  # type: ignore[assignment]
-
-            age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
-
-            if age_hours <= 2:
-                scores["freshness"] = 20
-            elif age_hours <= 12:
-                scores["freshness"] = 15
-            elif age_hours <= 24:
-                scores["freshness"] = 10
-            elif age_hours <= 48:
-                scores["freshness"] = 5
-            else:
-                scores["freshness"] = 2
+            _age_hours = (datetime.now(timezone.utc) - dt).total_seconds() / 3600
         except Exception:
+            _age_hours = None
+    if _age_hours is not None:
+        if _age_hours <= 2:
+            scores["freshness"] = 20
+        elif _age_hours <= 12:
+            scores["freshness"] = 15
+        elif _age_hours <= 24:
+            scores["freshness"] = 10
+        elif _age_hours <= 48:
             scores["freshness"] = 5
+        elif _age_hours <= 96:
+            scores["freshness"] = 2
+        else:
+            # Données périmées (> 4 jours) : pénalité forte
+            scores["freshness"] = 0
 
     # ── CRITÈRE 4 : Validation Groq IA (10 pts max) ───────────────────────
     if groq_valid is True:
@@ -115,6 +128,42 @@ def compute_confidence_score(
         "groq": scores["groq"],
         "price_range": scores["price_range"],
     }
+
+    # ── BONUS PREMIUM : SerpAPI validation (+12 pts max) ─────────────────
+    if serpapi_validated:
+        serp_bonus = 12
+        total += serp_bonus
+        details_map["serpapi_bonus"] = serp_bonus
+
+    # ── PÉNALITÉ : prix minimum suspect vs médiane (-15 pts) ─────────────
+    # suspect_min = True si price_min < 60% de la médiane/avg
+    if suspect_min:
+        suspect_penalty = -15
+        total += suspect_penalty
+        details_map["suspect_min_penalty"] = suspect_penalty
+
+    # ── PÉNALITÉ : spread extrême > 80% (-8 pts supplémentaires) ─────────
+    # En plus de la pénalité déjà dans price_coherence
+    if spread_pct > 80:
+        extra_spread_penalty = -8
+        total += extra_spread_penalty
+        details_map["extreme_spread_penalty"] = extra_spread_penalty
+
+    # ── BONUS : diversité sources (boutiques distinctes) ─────────────────
+    if source_diversity >= 8:
+        div_bonus = 6
+        total += div_bonus
+        details_map["source_diversity_bonus"] = div_bonus
+    elif source_diversity >= 5:
+        div_bonus = 3
+        total += div_bonus
+        details_map["source_diversity_bonus"] = div_bonus
+
+    # ── PÉNALITÉ : données périmées renforcée sur spread élevé ───────────
+    if _age_hours is not None and _age_hours > 48 and spread_pct > 35:
+        stale_spread_penalty = -5
+        total += stale_spread_penalty
+        details_map["stale_spread_penalty"] = stale_spread_penalty
     if brand and model and (brand.strip() and model.strip()):
         try:
             from app.brand_price_rules import get_price_range
@@ -123,6 +172,15 @@ def compute_confidence_score(
             if lo <= float(price_avg) <= hi:
                 total += 5
                 details_map["brand_rules"] = 5
+        except Exception:
+            pass
+        # ── Bonus TOP 30 : modèle premium avec sources suffisantes ────────
+        try:
+            from app.top_models import TOP_30_CONFIDENCE_BONUS, TOP_30_MIN_SOURCES, is_top_model
+
+            if is_top_model(brand, model) and nb_sources >= TOP_30_MIN_SOURCES:
+                total += TOP_30_CONFIDENCE_BONUS
+                details_map["top30_premium"] = TOP_30_CONFIDENCE_BONUS
         except Exception:
             pass
     if claude_points is not None:
@@ -150,11 +208,20 @@ def compute_confidence_score(
     else:
         label, stars, color = "Très faible", 1, "red"
 
+    tier = "standard"
+    if brand and model:
+        try:
+            from app.top_models import top_model_tier
+            tier = top_model_tier(brand, model)
+        except Exception:
+            pass
+
     return {
         "score": total,
         "label": label,
         "stars": stars,
         "color": color,
+        "tier": tier,
         "details": details_map,
     }
 

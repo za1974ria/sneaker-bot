@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import random
 import re
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, wait
@@ -26,6 +25,12 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from scrapers.base_scraper import BaseScraper
+from scrapers.high_precision_core import (
+    get_cached_high_precision_prices,
+    run_high_precision_core,
+    should_rescrape_model,
+)
+from scrapers.precision_engine import validate_price
 from scrapers.utils.normalize import clean_text, parse_price_to_eur
 
 
@@ -33,8 +38,8 @@ logger = logging.getLogger(__name__)
 
 # Parallélisation intra-modèle (sources) — plafond par défaut si l’appelant ne fixe pas max_workers_cap.
 MAX_PARALLEL_FR_SITES = 6
-# Timeout par tâche source (secondes).
-_FR_SITE_FUTURE_TIMEOUT_SEC = 25
+# Timeout par tâche source (secondes). Réduit de 25 → 12 pour respecter le budget global par modèle.
+_FR_SITE_FUTURE_TIMEOUT_SEC = 12
 
 
 def _mount_zero_retry_session(session: requests.Session, *, retry_total: int) -> None:
@@ -72,17 +77,28 @@ def _fr_run_one_site(
         s._fast_mode = True
         s.MIN_DELAY_SEC = 0.0
         s.MAX_DELAY_SEC = 0.0
-        # Mode rapide mais réaliste: timeout légèrement augmenté pour éviter
-        # d'éliminer trop de sources valides sous latence réseau normale.
-        s.TIMEOUT_SEC = 10
+        # Timeout strict 8s pour respecter le budget global par modèle (40s wall).
+        s.TIMEOUT_SEC = 8
         _mount_zero_retry_session(s.session, retry_total=1)
     try:
+        from scrapers.last_good_cache import get_last_good_prices, save_last_good_prices
+
         prices = func(s, brand, model)
-        if not prices:
-            _mark_empty(site_name, brand, model)
-        return site_name, prices or []
+        if prices:
+            save_last_good_prices(site_name, brand, model, list(prices))
+            print(f"[SCRAPER] {site_name} → OK")
+            return site_name, list(prices)
+        # Cache secours : uniquement si le scraper n’a aucun prix (ne pas écraser des prix réels).
+        fallback = get_last_good_prices(site_name, brand, model)
+        if fallback:
+            print(f"[SCRAPER] {site_name} → OK (cache secours)")
+            return site_name, fallback
+        _mark_empty(site_name, brand, model)
+        print(f"[SCRAPER] {site_name} → FAIL")
+        return site_name, []
     except Exception as e:  # noqa: BLE001
         logger.debug("FR site %s brand=%s model=%s err=%s", site_name, brand, model, e)
+        print(f"[SCRAPER] {site_name} → FAIL")
         return site_name, []
 
 
@@ -109,13 +125,68 @@ class FranceScraper(BaseScraper):
         ("Sports Direct", "sportsdirect.com"),
     )
 
+    def _build_precision_hit(self, *, brand: str, model: str, price: float, site: str) -> dict[str, object]:
+        """Construit une vue hit enrichie precision_* (API optionnelle, non cassante)."""
+        precision = validate_price(
+            {
+                "brand": brand,
+                "model": model,
+                "title": f"{brand} {model}",
+                "price": float(price),
+                "current_price": float(price),
+                "site": site,
+                "source": site,
+                "market": "FR",
+            }
+        )
+        hit = {
+            "brand": brand,
+            "model": model,
+            "price": round(float(price), 2),
+            "source": site,
+            "currency": "EUR",
+            "precision_confidence_score": precision.get("confidence_score"),
+            "precision_is_suspicious": precision.get("is_suspicious"),
+            "precision_risk_level": precision.get("risk_level"),
+            "precision_match_quality": precision.get("match_quality"),
+            "precision_overall_reliability": precision.get("overall_reliability"),
+            "precision_explanation": precision.get("explanation"),
+            "precision_suggested_price": precision.get("suggested_price"),
+            "precision_reasoning": precision.get("reasoning"),
+        }
+        if bool(precision.get("is_suspicious")):
+            logger.warning(
+                "[FR Precision] suspicious brand=%s model=%s site=%s price=%.2f conf=%s risk=%s overall_reliability=%s",
+                brand,
+                model,
+                site,
+                float(price),
+                precision.get("confidence_score"),
+                precision.get("risk_level"),
+                precision.get("overall_reliability"),
+            )
+        return hit
+
     def fetch_html(self, url: str, *, raise_for_status: bool = True) -> str:
         """Délai court en mode pipeline (``max_sites`` défini), sinon jitter classe de base."""
-        if getattr(self, "_fast_mode", False):
-            time.sleep(random.uniform(0.25, 0.35))
-        else:
+        # Mode rapide : pas de sleep ici — ``fetch_with_retry`` applique déjà un jitter avant chaque GET.
+        if not getattr(self, "_fast_mode", False):
             self._sleep_jitter()
-        resp = self.session.get(url, timeout=self.TIMEOUT_SEC)
+        from scrapers.utils.fetch_retry import fetch_with_retry
+        from scrapers.utils.safe_http import get_safe_headers
+
+        extra: dict[str, object] = {}
+        if "courir.com" in url or "footlocker.fr" in url:
+            h = {**dict(self.session.headers), **get_safe_headers()}
+            extra["headers"] = h
+            extra["min_body_chars"] = 100
+            extra["require_status_ok"] = True
+
+        resp = fetch_with_retry(self.session, url, timeout=10.0, attempts=3, **extra)
+        if resp is None:
+            if raise_for_status:
+                raise requests.HTTPError(f"GET failed after retries: {url}")
+            return ""
         if raise_for_status:
             resp.raise_for_status()
         return resp.text
@@ -341,10 +412,10 @@ class FranceScraper(BaseScraper):
     # --- Site-specific search URLs -----------------------------------------------
     def _search_urls_courir(self, brand: str, model: str) -> List[str]:
         q = quote_plus(f"{brand} {model}")
+        # Courir est sur Salesforce Commerce Cloud (SFCC/Demandware).
+        # /fr/search?q= est l'URL correcte (200) ; /recherche/ et /search sans /fr/ → 404.
         return [
-            f"https://www.courir.com/search?q={q}",
-            f"https://www.courir.com/recherche?q={q}",
-            f"https://www.courir.com/recherche?query={q}",
+            f"https://www.courir.com/fr/search?q={q}",
         ]
 
     def _search_urls_footlocker(self, brand: str, model: str) -> List[str]:
@@ -399,6 +470,26 @@ class FranceScraper(BaseScraper):
             prices = self._scrape_site_first_hit(self._search_urls_courir(vb, vm), brand=brand, model=model)
             if prices:
                 return prices
+        # Courir (SFCC) rend les prix en JS — fallback Playwright.
+        try:
+            from scrapers.anti_bot_diag import detect_block_reason, dump_snapshot
+            from scrapers.hypermarches import _fetch_html_playwright
+            from scrapers.tier1_sites import extract_search_result_prices
+
+            for vb, vm in self._query_variants(brand, model):
+                for url in self._search_urls_courir(vb, vm):
+                    html = _fetch_html_playwright(url, source_name="Courir")
+                    if not html:
+                        dump_snapshot("Courir", url, "", "empty_html")
+                        continue
+                    reason = detect_block_reason(html)
+                    if reason:
+                        dump_snapshot("Courir", url, html, reason)
+                    prices = extract_search_result_prices(html, brand, model)
+                    if prices:
+                        return self.filter_prices(brand, prices)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("FR courir playwright fallback err=%s", e)
         return []
 
     def _scrape_footlocker(self, brand: str, model: str) -> List[float]:
@@ -458,15 +549,21 @@ class FranceScraper(BaseScraper):
     def _scrape_tier1_site(self, display_name: str, scraper_cls: type, brand: str, model: str) -> List[float]:
         """
         Appelle un scraper Tier 1 (list[dict]) et renvoie des floats pour l’agrégateur.
+        En mode fast (_fast_mode=True), désactive le fallback Playwright dans les scrapers Tier1.
         """
-        from scrapers.tier1_sites import hits_to_prices
+        from scrapers.tier1_sites import hits_to_prices, _set_pipeline_fast_mode
 
+        if self._fast_mode:
+            _set_pipeline_fast_mode(True)
         try:
             hits = scraper_cls().scrape_model(brand, model)
             return hits_to_prices(hits)
         except Exception as e:  # noqa: BLE001
             logger.debug("Tier1 %s %s %s: %s", display_name, brand, model, e)
             return []
+        finally:
+            if self._fast_mode:
+                _set_pipeline_fast_mode(False)
 
     @staticmethod
     def _fr_site_job_specs(max_sites: int | None) -> list[tuple[str, Callable[["FranceScraper", str, str], List[float]]]]:
@@ -474,8 +571,8 @@ class FranceScraper(BaseScraper):
 
         jobs: list[tuple[str, Callable[["FranceScraper", str, str], List[float]]]] = [
             ("Courir", lambda s, b, m: s._scrape_courir(b, m)),
-            ("Foot Locker", lambda s, b, m: s._scrape_footlocker(b, m)),
-            ("Snipes", lambda s, b, m: s._scrape_snipes(b, m)),
+            # ("Foot Locker", lambda s, b, m: s._scrape_footlocker(b, m)),  # Désactivé 2026-04-10 — HTTP 400/403 systématique, bloqué anti-bot
+            # ("Snipes", lambda s, b, m: s._scrape_snipes(b, m)),  # Désactivé 2026-04-10 — timeout systématique, IP bloquée
             # ("Sports Direct", lambda s, b, m: s._scrape_sportsdirect(b, m)),  # Désactivé 2026-04-07 — timeout 100%, bloqué même via proxy
         ]
         for disp, cls in TIER1_EXTRA_SCRAPER_CLASSES:
@@ -510,7 +607,9 @@ class FranceScraper(BaseScraper):
         wall = float(wall_timeout_sec) if wall_timeout_sec is not None else 100.0
         wall = max(25.0, wall)
         deadline = time.monotonic() + wall
-        with ThreadPoolExecutor(max_workers=workers) as ex:
+        ex = ThreadPoolExecutor(max_workers=workers)
+        wall_hit = False
+        try:
             pending_set = {
                 ex.submit(_fr_run_one_site, name, fn, brand, model, fast=fast) for name, fn in specs
             }
@@ -524,6 +623,7 @@ class FranceScraper(BaseScraper):
                         model,
                         len(pending_set),
                     )
+                    wall_hit = True
                     break
                 step = min(max(0.5, remaining), float(_FR_SITE_FUTURE_TIMEOUT_SEC))
                 done, not_done = wait(pending_set, timeout=step, return_when=FIRST_COMPLETED)
@@ -535,6 +635,10 @@ class FranceScraper(BaseScraper):
                         logger.debug("FR site future timeout brand=%s model=%s", brand, model)
                     except Exception as e:  # noqa: BLE001
                         logger.debug("FR parallel site err: %s", e)
+        finally:
+            # cancel_futures=True (Python 3.9+) : annule les futures non démarrées et
+            # n'attend pas les Playwright encore en vol — essentiel en mode rebuild court.
+            ex.shutdown(wait=not wall_hit, cancel_futures=wall_hit)
         return results
 
     # --- Public API ---------------------------------------------------------------
@@ -546,6 +650,15 @@ class FranceScraper(BaseScraper):
         model = (model or "").strip()
         if not brand or not model:
             return []
+        # High-Precision Core cache gate (compat: fallback sur flow classique si erreur).
+        try:
+            if not should_rescrape_model(brand, model, market="FR"):
+                cached = get_cached_high_precision_prices(brand, model, market="FR")
+                if cached:
+                    logger.info("FR scrape_model cache hit %s %s (%d prix)", brand, model, len(cached))
+                    return self.filter_prices(brand, cached[: self.MAX_PRICES])
+        except Exception as e:  # noqa: BLE001
+            logger.debug("FR scrape_model high_precision cache skip %s %s: %s", brand, model, e)
 
         pairs = self._collect_parallel_fr_sites(brand, model, max_sites=max_sites)
         all_prices: List[float] = []
@@ -557,25 +670,74 @@ class FranceScraper(BaseScraper):
 
         seen: set[float] = set()
         unique: List[float] = []
+        precision_hits: list[dict[str, object]] = []
         for p in all_prices:
             if p in seen:
                 continue
             seen.add(p)
             unique.append(p)
+            precision_hits.append(
+                self._build_precision_hit(
+                    brand=brand,
+                    model=model,
+                    price=float(p),
+                    site="FranceScraper",
+                )
+            )
             if len(unique) >= self.MAX_PRICES:
                 break
+        # High-Precision Core fusion (safe fallback).
+        try:
+            hp = run_high_precision_core(
+                brand=brand,
+                model=model,
+                market="FR",
+                scraped_prices=list(unique),
+                confirm_scrape_fn=None,  # évite récursion ici
+            )
+            hp_prices = hp.get("prices") or []
+            if hp_prices:
+                unique = [float(x) for x in hp_prices][: self.MAX_PRICES]
+                logger.info(
+                    "FR scrape_model high_precision %s %s -> %d prix (reliability=%s)",
+                    brand,
+                    model,
+                    len(unique),
+                    hp.get("overall_reliability"),
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("FR scrape_model high_precision fusion skip %s %s: %s", brand, model, e)
+        # Compat ascendante: scrape_model continue de retourner List[float].
+        # Les hits enrichis restent disponibles pour les appels qui en ont besoin.
+        self._last_precision_hits = precision_hits
         return self.filter_prices(brand, unique)
 
-    def scrape_model_by_site(self, brand: str, model: str, *, max_sites: int | None = None) -> dict[str, List[float]]:
+    def scrape_model_hits(self, brand: str, model: str, *, max_sites: int | None = None) -> list[dict[str, object]]:
+        """
+        Variante enrichie avec precision_*.
+        Ne remplace pas scrape_model() pour préserver la compatibilité existante.
+        """
+        self.scrape_model(brand, model, max_sites=max_sites)
+        return list(getattr(self, "_last_precision_hits", []))
+
+    def scrape_model_by_site(
+        self,
+        brand: str,
+        model: str,
+        *,
+        max_sites: int | None = None,
+        wall_timeout_sec: float | None = None,
+    ) -> dict[str, List[float]]:
         """
         Retourne les prix par site pour comparaison type Trivago.
+        wall_timeout_sec : budget global par modèle (défaut 100 s). Passer ~35 s en mode rebuild.
         """
         brand = (brand or "").strip()
         model = (model or "").strip()
         if not brand or not model:
             return {}
 
-        pairs = self._collect_parallel_fr_sites(brand, model, max_sites=max_sites)
+        pairs = self._collect_parallel_fr_sites(brand, model, max_sites=max_sites, wall_timeout_sec=wall_timeout_sec)
         out: dict[str, List[float]] = {}
         for site_name, prices in pairs:
             try:

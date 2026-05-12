@@ -8,13 +8,17 @@ from __future__ import annotations
 # Fourchettes de prix attendues par marque (min, max) en €
 BRAND_PRICE_RANGES: dict[str, dict[str, tuple[float, float]]] = {
     "nike": {
-        "default": (60, 250),
-        "air force 1": (85, 150),
-        "air jordan 1": (110, 300),
-        "air max 97": (150, 250),
-        "air max 90": (100, 200),
-        "dunk low": (90, 180),
-        "dunk high": (100, 200),
+        "default":                (55, 350),
+        "air force 1":            (85, 180),
+        "air jordan 1":           (110, 400),
+        "air jordan 1 low":       (100, 300),
+        "air jordan 1 low women": (100, 350),
+        "air max 97":             (150, 300),
+        "air max 90":             (100, 250),
+        "air max 1":              (110, 250),
+        "dunk low":               (90, 280),
+        "dunk high":              (100, 280),
+        "cortez":                 (80, 160),
     },
     "adidas": {
         "default": (55, 220),
@@ -26,29 +30,39 @@ BRAND_PRICE_RANGES: dict[str, dict[str, tuple[float, float]]] = {
         "stan smith": (70, 120),
     },
     "new balance": {
-        "default": (70, 250),
-        "574": (75, 120),
-        "530": (80, 130),
-        "550": (85, 140),
-        "990": (150, 280),
-        "2002r": (110, 180),
-        "1906r": (110, 180),
+        "default":       (65, 300),
+        "574":           (75, 150),
+        "530":           (80, 160),
+        "550":           (85, 180),
+        "990":           (150, 350),
+        "2002r":         (110, 280),
+        "2002r gore-tex":(130, 400),
+        "1906r":         (110, 220),
+        "860":           (100, 180),
     },
     "on running": {
         "default": (120, 220),
     },
     "salomon": {
-        "default": (100, 200),
-        "xt-4": (120, 180),
-        "xt-6": (130, 190),
-        "speedcross": (100, 170),
+        "default":          (90, 350),
+        "xt-4":             (120, 250),
+        "xt-6":             (130, 260),
+        "speedcross":       (100, 220),
+        "pulsar platform":  (150, 700),
+        "acs pro":          (150, 600),
+        "acs pro advanced": (150, 650),
+        "acs pro women":    (150, 600),
+        "amphib bold":      (100, 220),
     },
     "asics": {
-        "default": (70, 200),
-        "gel-kayano": (90, 170),
-        "gel-nimbus": (100, 180),
-        "gt-2160": (80, 150),
-        "gel-1130": (80, 150),
+        "default":         (65, 300),
+        "gel-kayano":      (90, 220),
+        "gel-nimbus":      (100, 350),
+        "gel-nimbus 9":    (100, 400),
+        "gt-2160":         (80, 280),
+        "gt-2160 premium": (100, 400),
+        "gel-1130":        (80, 200),
+        "gel-lyte":        (80, 250),
     },
     "puma": {
         "default": (55, 150),
@@ -57,12 +71,19 @@ BRAND_PRICE_RANGES: dict[str, dict[str, tuple[float, float]]] = {
         "palermo": (70, 120),
     },
     "reebok": {
-        "default": (60, 180),
+        "default":               (55, 250),
+        "classic leather":       (60, 300),
+        "classic leather women": (60, 400),
+        "club c":                (60, 180),
+        "nano":                  (100, 200),
     },
     "vans": {
-        "default": (60, 130),
-        "old skool": (65, 110),
-        "sk8-hi": (70, 120),
+        "default":       (55, 300),
+        "old skool":     (65, 180),
+        "sk8-hi":        (70, 200),
+        "slip-on":       (60, 350),
+        "slip-on women": (60, 400),
+        "era":           (60, 150),
     },
     "converse": {
         "default": (55, 120),
@@ -79,13 +100,14 @@ def get_price_range(brand: str, model: str) -> tuple[float, float]:
 
     brand_rules = BRAND_PRICE_RANGES.get(brand_lower, {})
     if not brand_rules:
-        return (30.0, 500.0)
+        return (30.0, 800.0)
 
-    for model_key, price_range in brand_rules.items():
-        if model_key != "default" and model_key in model_lower:
-            return price_range
+    # Tri par longueur décroissante : les clés les plus spécifiques matchent en premier
+    for model_key in sorted((k for k in brand_rules if k != "default"), key=len, reverse=True):
+        if model_key in model_lower:
+            return brand_rules[model_key]
 
-    return brand_rules.get("default", (30.0, 500.0))
+    return brand_rules.get("default", (30.0, 800.0))
 
 
 def validate_price_by_brand_rules(brand: str, model: str, price: float) -> dict:

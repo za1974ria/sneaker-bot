@@ -2,623 +2,839 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>SneakerBot — Mission Control</title>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>SneakerBot — Elite Ops Cockpit</title>
 <style>
-/* ════════════════════════════════════════════════════
-   MISSION CONTROL — PREMIUM DARK THEME
-   Palette : #0a0d12 bg / #00ff88 green / #ff9900 orange / #ff3344 red
-   Style : Datadog + Tesla + NASA cockpit
-════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════
+   ELITE OPS COCKPIT V2
+   Palette obsidian / neon-green / amber / red
+   Glassmorphism subtil — zéro surcharge
+══════════════════════════════════════════════ */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:       #0a0d12;
-  --bg2:      #0e1318;
-  --bg3:      #13191f;
-  --border:   #1e2a35;
-  --green:    #00ff88;
-  --green-dim:#00c865;
-  --orange:   #ff9900;
-  --red:      #ff3344;
-  --blue:     #0088ff;
-  --text:     #c8d8e8;
-  --text-dim: #5a7080;
-  --font:     'SF Mono','Fira Code','Cascadia Code',Consolas,monospace;
+  --bg:    #080b10;
+  --bg2:   #0d1117;
+  --bg3:   #13191f;
+  --bg4:   #1a2230;
+  --b:     #1e2d3d;
+  --green: #00ff88;
+  --gdim:  #00c865;
+  --amber: #ffaa00;
+  --red:   #ff3344;
+  --blue:  #4d9fff;
+  --txt:   #c8d8e8;
+  --dim:   #4a6070;
+  --font:  'SF Mono','Fira Code','Cascadia Code',Consolas,monospace;
 }
-html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px}
+html,body{height:100%;background:var(--bg);color:var(--txt);font-family:var(--font);font-size:12px;line-height:1.5}
 
 /* ── Header ── */
 header{
   display:flex;align-items:center;justify-content:space-between;
-  padding:14px 24px;border-bottom:1px solid var(--border);
-  background:var(--bg2);position:sticky;top:0;z-index:100;
+  padding:12px 20px;border-bottom:1px solid var(--b);
+  background:rgba(13,17,23,.95);backdrop-filter:blur(12px);
+  position:sticky;top:0;z-index:200;
 }
-.hdr-brand{display:flex;align-items:center;gap:12px}
-.hdr-logo{font-size:20px;font-weight:700;letter-spacing:-0.5px;color:#fff}
-.hdr-logo span{color:var(--green)}
-.hdr-badge{
-  font-size:10px;padding:2px 8px;border-radius:20px;
-  background:rgba(0,255,136,.12);border:1px solid rgba(0,255,136,.3);
-  color:var(--green);letter-spacing:1px;text-transform:uppercase;
-}
-.hdr-right{display:flex;align-items:center;gap:16px}
-#global-status-badge{
-  padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;
-  letter-spacing:1px;text-transform:uppercase;transition:all .3s;
-}
-.badge-healthy {background:rgba(0,255,136,.15);border:1px solid var(--green);color:var(--green)}
-.badge-degraded{background:rgba(255,153,0,.15);border:1px solid var(--orange);color:var(--orange)}
-.badge-critical{background:rgba(255,51,68,.15);border:1px solid var(--red);color:var(--red);animation:pulse-red 1.5s infinite}
-#clock{color:var(--text-dim);font-size:11px;min-width:120px;text-align:right}
+.hbrand{display:flex;align-items:center;gap:10px}
+.hlogo{font-size:17px;font-weight:700;color:#fff;letter-spacing:-.5px}
+.hlogo span{color:var(--green)}
+.hv2{font-size:9px;padding:2px 7px;border-radius:20px;letter-spacing:1.5px;text-transform:uppercase;
+     background:rgba(0,255,136,.1);border:1px solid rgba(0,255,136,.25);color:var(--green)}
+.hright{display:flex;align-items:center;gap:12px}
+#gbadge{padding:4px 12px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;transition:all .3s}
+.badge-healthy {background:rgba(0,255,136,.12);border:1px solid var(--green);color:var(--green)}
+.badge-degraded{background:rgba(255,170, 0,.12);border:1px solid var(--amber);color:var(--amber)}
+.badge-critical{background:rgba(255, 51,68,.12);border:1px solid var(--red);color:var(--red);animation:p-red 1.5s infinite}
+#clock{color:var(--dim);font-size:10px;min-width:70px;text-align:right}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:5px;border:1px solid;
+     font-family:var(--font);font-size:11px;font-weight:600;cursor:pointer;transition:all .2s;text-decoration:none;background:none}
+.btn-g{border-color:var(--green);color:var(--green)}
+.btn-g:hover{background:rgba(0,255,136,.12)}
+.btn-a{border-color:var(--amber);color:var(--amber)}
+.btn-a:hover{background:rgba(255,170,0,.12)}
+.btn-r{border-color:var(--red);color:var(--red)}
+.btn-r:hover{background:rgba(255,51,68,.12)}
+.btn-s{border-color:var(--b);color:var(--dim)}
+.btn-s:hover{border-color:var(--dim)}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
 
 /* ── Layout ── */
-main{padding:20px 24px;max-width:1600px;margin:0 auto}
-.section-title{
-  font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);
-  margin:24px 0 12px;padding-bottom:8px;border-bottom:1px solid var(--border);
-}
-.grid{display:grid;gap:12px}
-.grid-2{grid-template-columns:repeat(2,1fr)}
-.grid-3{grid-template-columns:repeat(3,1fr)}
-.grid-4{grid-template-columns:repeat(4,1fr)}
-@media(max-width:1100px){.grid-4{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:760px){.grid-2,.grid-3,.grid-4{grid-template-columns:1fr}}
+main{padding:16px 20px 32px;max-width:1700px;margin:0 auto}
+.stitle{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--dim);
+        margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--b)}
+.grid{display:grid;gap:10px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+.g5{grid-template-columns:repeat(5,1fr)}
+.g6{grid-template-columns:repeat(6,1fr)}
+.gcols{grid-template-columns:1fr 1fr}
+@media(max-width:1200px){.g5,.g6{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){.g2,.g3,.g4,.g5,.g6,.gcols{grid-template-columns:1fr}}
 
 /* ── Cards ── */
-.card{
-  background:var(--bg2);border:1px solid var(--border);border-radius:10px;
-  padding:16px;position:relative;overflow:hidden;transition:border-color .2s;
-}
-.card::before{
-  content:'';position:absolute;top:0;left:0;right:0;height:2px;
-  background:var(--accent-color,var(--border));transition:background .3s;
-}
+.card{background:var(--bg2);border:1px solid var(--b);border-radius:8px;padding:14px;position:relative;overflow:hidden;transition:border-color .2s}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--b);transition:background .3s}
 .card.green::before{background:var(--green)}
-.card.orange::before{background:var(--orange)}
+.card.orange::before,.card.amber::before{background:var(--amber)}
 .card.red::before{background:var(--red)}
-.card:hover{border-color:rgba(255,255,255,.15)}
+.card.blue::before{background:var(--blue)}
+.card:hover{border-color:rgba(255,255,255,.1)}
+/* Glassmorphism très discret sur cartes clés */
+.card.glass{backdrop-filter:blur(8px);background:rgba(13,17,23,.7)}
 
-.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.card-title{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim)}
-.status-dot{
-  width:8px;height:8px;border-radius:50%;flex-shrink:0;
-  background:var(--text-dim);transition:background .3s;
-}
-.dot-green {background:var(--green);box-shadow:0 0 6px var(--green)}
-.dot-orange{background:var(--orange);box-shadow:0 0 6px var(--orange);animation:pulse-orange 2s infinite}
-.dot-red   {background:var(--red);box-shadow:0 0 6px var(--red);animation:pulse-red 1.5s infinite}
+.ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.ct{font-size:9px;text-transform:uppercase;letter-spacing:1px;color:var(--dim)}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dg{background:var(--green);box-shadow:0 0 5px var(--green)}
+.da{background:var(--amber);box-shadow:0 0 5px var(--amber);animation:p-amb 2s infinite}
+.dr{background:var(--red);box-shadow:0 0 5px var(--red);animation:p-red 1.5s infinite}
+.dd{background:var(--dim)}
 
-.card-value{font-size:26px;font-weight:700;color:#fff;line-height:1;margin-bottom:4px}
-.card-sub{font-size:11px;color:var(--text-dim)}
-.card-tag{
-  display:inline-block;margin-top:8px;padding:2px 8px;border-radius:4px;
-  font-size:10px;text-transform:uppercase;letter-spacing:.5px;
-}
-.tag-green {background:rgba(0,255,136,.1);color:var(--green)}
-.tag-orange{background:rgba(255,153,0,.1);color:var(--orange)}
-.tag-red   {background:rgba(255,51,68,.1);color:var(--red)}
-.tag-blue  {background:rgba(0,136,255,.1);color:var(--blue)}
-
-/* ── Big status banner ── */
-#status-banner{
-  border-radius:10px;padding:20px 24px;
-  display:flex;align-items:center;gap:20px;
-  background:var(--bg3);border:1px solid var(--border);
-  transition:border-color .3s;margin-bottom:4px;
-}
-#status-banner.green{border-color:var(--green);background:rgba(0,255,136,.04)}
-#status-banner.orange{border-color:var(--orange);background:rgba(255,153,0,.04)}
-#status-banner.red{border-color:var(--red);background:rgba(255,51,68,.04)}
-.banner-icon{font-size:36px;line-height:1}
-.banner-text h2{font-size:18px;font-weight:700;color:#fff;margin-bottom:2px}
-.banner-text p{font-size:12px;color:var(--text-dim)}
-.banner-right{margin-left:auto;text-align:right}
-.banner-time{font-size:11px;color:var(--text-dim)}
-
-/* ── Alerts ── */
-.alert-item{
-  padding:10px 14px;border-radius:6px;border-left:3px solid;margin-bottom:8px;
-  display:flex;align-items:flex-start;gap:10px;
-}
-.alert-critical{background:rgba(255,51,68,.08);border-color:var(--red)}
-.alert-warning {background:rgba(255,153,0,.08);border-color:var(--orange)}
-.alert-info    {background:rgba(0,136,255,.08);border-color:var(--blue)}
-.alert-icon{font-size:14px;flex-shrink:0;margin-top:1px}
-.alert-body p{font-size:12px;color:var(--text);margin-bottom:2px}
-.alert-body small{font-size:10px;color:var(--text-dim)}
-.alert-source{
-  margin-left:auto;flex-shrink:0;
-  font-size:9px;text-transform:uppercase;letter-spacing:.5px;
-  color:var(--text-dim);white-space:nowrap;
-}
-
-/* ── Diagnostic panel ── */
-#diag-panel{
-  display:none;background:var(--bg3);border:1px solid var(--border);
-  border-radius:10px;padding:20px;margin-top:12px;
-}
-#diag-panel.visible{display:block}
-.diag-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:16px}
-.diag-item{
-  background:var(--bg2);border:1px solid var(--border);border-radius:6px;
-  padding:12px;display:flex;align-items:center;gap:10px;
-}
-.diag-item .label{font-size:11px;color:var(--text-dim)}
-.diag-item .val{font-size:12px;color:#fff;font-weight:600}
-.reco-list{list-style:none;display:flex;flex-direction:column;gap:6px}
-.reco-list li{
-  padding:8px 12px;background:var(--bg2);border-radius:6px;
-  border-left:2px solid var(--text-dim);font-size:12px;
-}
-.reco-ok{border-color:var(--green)!important;color:var(--green-dim)}
-.reco-warn{border-color:var(--orange)!important}
-.reco-crit{border-color:var(--red)!important;color:#ffa0a8}
-
-/* ── Buttons ── */
-.btn{
-  display:inline-flex;align-items:center;gap:8px;padding:9px 20px;
-  border-radius:6px;border:1px solid;font-family:var(--font);
-  font-size:12px;font-weight:600;letter-spacing:.3px;cursor:pointer;
-  transition:all .2s;text-decoration:none;
-}
-.btn-primary{background:rgba(0,255,136,.1);border-color:var(--green);color:var(--green)}
-.btn-primary:hover{background:rgba(0,255,136,.2)}
-.btn-danger{background:rgba(255,51,68,.1);border-color:var(--red);color:var(--red)}
-.btn-secondary{background:var(--bg3);border-color:var(--border);color:var(--text)}
-.btn-secondary:hover{border-color:var(--text-dim)}
-.btn[disabled]{opacity:.5;cursor:not-allowed}
-#run-diag-btn .spin{display:none}
-#run-diag-btn.loading .spin{display:inline}
-#run-diag-btn.loading .idle-text{display:none}
+.cv{font-size:22px;font-weight:700;color:#fff;line-height:1.1;margin-bottom:3px}
+.cs{font-size:10px;color:var(--dim)}
+.tag{display:inline-block;padding:1px 7px;border-radius:3px;font-size:9px;text-transform:uppercase;letter-spacing:.5px;margin-top:6px}
+.tg{background:rgba(0,255,136,.1);color:var(--green)}
+.ta{background:rgba(255,170,0,.1);color:var(--amber)}
+.tr{background:rgba(255,51,68,.1);color:var(--red)}
+.tb{background:rgba(77,159,255,.1);color:var(--blue)}
 
 /* ── Progress bar ── */
-.progress-bar{height:6px;background:var(--bg3);border-radius:3px;overflow:hidden;margin-top:8px}
-.progress-fill{height:100%;border-radius:3px;transition:width .5s}
-.fill-green {background:var(--green)}
-.fill-orange{background:var(--orange)}
-.fill-red   {background:var(--red)}
+.pb{height:4px;background:var(--bg4);border-radius:2px;overflow:hidden;margin-top:8px}
+.pf{height:100%;border-radius:2px;transition:width .6s}
+.pfg{background:var(--green)}
+.pfa{background:var(--amber)}
+.pfr{background:var(--red)}
+.pfb{background:var(--blue)}
 
-/* ── Raw JSON viewer ── */
-.json-block{
-  background:#060a0d;border:1px solid var(--border);border-radius:6px;
-  padding:14px;font-size:11px;line-height:1.6;overflow:auto;
-  max-height:400px;white-space:pre-wrap;color:#a0c8d0;margin-top:10px;
-  display:none;
+/* ── Banner ── */
+#banner{
+  border-radius:8px;padding:16px 20px;display:flex;align-items:center;gap:16px;
+  background:var(--bg3);border:1px solid var(--b);transition:border-color .3s;margin-bottom:4px;
 }
-.json-block.visible{display:block}
+#banner.green{border-color:rgba(0,255,136,.3);background:rgba(0,255,136,.03)}
+#banner.orange,#banner.amber{border-color:rgba(255,170,0,.3);background:rgba(255,170,0,.03)}
+#banner.red{border-color:rgba(255,51,68,.3);background:rgba(255,51,68,.03)}
+.b-icon{font-size:28px}
+.b-txt h2{font-size:15px;font-weight:700;color:#fff;margin-bottom:2px}
+.b-txt p{font-size:11px;color:var(--dim)}
+.b-right{margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.b-time{font-size:10px;color:var(--dim)}
 
-/* ── Metric table ── */
-.metric-table{width:100%;border-collapse:collapse;font-size:12px}
-.metric-table th{
-  text-align:left;padding:8px 10px;font-size:10px;
-  text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);
-  border-bottom:1px solid var(--border);
-}
-.metric-table td{padding:8px 10px;border-bottom:1px solid rgba(30,42,53,.7)}
-.metric-table tr:last-child td{border-bottom:none}
-.metric-table tr:hover td{background:rgba(255,255,255,.02)}
+/* ── Timeline ── */
+.tl-wrap{display:flex;flex-direction:column;gap:0}
+.tl-item{display:flex;gap:12px;padding:8px 0;position:relative}
+.tl-item:not(:last-child)::after{content:'';position:absolute;left:5px;top:20px;bottom:0;width:1px;background:var(--b)}
+.tl-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0;margin-top:3px;z-index:1}
+.tl-body{flex:1;min-width:0}
+.tl-time{font-size:10px;color:var(--dim);margin-bottom:1px}
+.tl-msg{font-size:11px;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tl-badge{font-size:9px;padding:1px 5px;border-radius:3px;display:inline-block;margin-top:2px}
 
-/* ── Footer ── */
-footer{
-  padding:16px 24px;border-top:1px solid var(--border);
-  display:flex;justify-content:space-between;align-items:center;
-  color:var(--text-dim);font-size:11px;margin-top:32px;
-}
+/* ── Alerts ── */
+.alert{padding:8px 12px;border-radius:5px;border-left:2px solid;margin-bottom:6px;display:flex;align-items:flex-start;gap:8px}
+.al-crit{background:rgba(255,51,68,.07);border-color:var(--red)}
+.al-warn{background:rgba(255,170,0,.07);border-color:var(--amber)}
+.al-info{background:rgba(77,159,255,.07);border-color:var(--blue)}
+.al-icon{font-size:12px;flex-shrink:0;margin-top:1px}
+.al-body p{font-size:11px;margin-bottom:1px}
+.al-body small{font-size:10px;color:var(--dim)}
+.al-src{margin-left:auto;flex-shrink:0;font-size:9px;text-transform:uppercase;color:var(--dim);white-space:nowrap}
+
+/* ── Terminal logs ── */
+.term{background:#020408;border:1px solid var(--b);border-radius:6px;padding:12px;font-size:10px;
+      line-height:1.7;overflow-y:auto;max-height:320px;color:#4ade80;font-family:var(--font)}
+.term .ln-err{color:var(--red)}
+.term .ln-warn{color:var(--amber)}
+.term .ln-info{color:#4ade80}
+.term .ln-other{color:#4a6070}
+.tabs{display:flex;gap:2px;margin-bottom:6px}
+.tab{padding:4px 12px;border-radius:4px 4px 0 0;font-size:10px;cursor:pointer;border:1px solid var(--b);
+     border-bottom:none;color:var(--dim);background:var(--bg3);transition:all .2s}
+.tab.active{background:var(--bg2);color:var(--green);border-color:var(--b)}
+
+/* ── Metrics ── */
+.metric-row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid rgba(30,45,61,.6)}
+.metric-row:last-child{border-bottom:none}
+.metric-name{color:var(--dim);font-size:10px}
+.metric-val{font-weight:700;font-size:13px}
+
+/* ── Diagnostic panel ── */
+#dpanel{display:none;background:var(--bg3);border:1px solid var(--b);border-radius:8px;padding:16px;margin-top:10px}
+#dpanel.show{display:block;animation:fi .3s ease}
+.dg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:14px}
+.dg-item{background:var(--bg2);border:1px solid var(--b);border-radius:5px;padding:10px;display:flex;align-items:center;gap:8px}
+.dg-item .label{font-size:10px;color:var(--dim)}
+.dg-item .val{font-size:11px;font-weight:600}
+.reco-list{list-style:none;display:flex;flex-direction:column;gap:4px}
+.reco-list li{padding:6px 10px;background:var(--bg2);border-radius:4px;border-left:2px solid var(--dim);font-size:11px}
+.reco-ok{border-color:var(--green)!important;color:var(--gdim)}
+.reco-w{border-color:var(--amber)!important}
+.reco-c{border-color:var(--red)!important;color:#ffa0a8}
+
+/* ── Source health grid ── */
+.sh-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px}
+.sh-card{background:var(--bg2);border:1px solid var(--b);border-radius:6px;padding:10px;position:relative;overflow:hidden}
+.sh-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px}
+.sh-card.green::before{background:var(--green)}
+.sh-card.orange::before{background:var(--amber)}
+.sh-card.red::before{background:var(--red)}
+.sh-brand{font-size:11px;font-weight:600;color:#fff;margin-bottom:4px}
+.sh-meta{font-size:10px;color:var(--dim)}
+
+/* ── Action confirm overlay ── */
+.confirm-wrap{position:fixed;inset:0;background:rgba(8,11,16,.8);display:flex;align-items:center;
+  justify-content:center;z-index:500;backdrop-filter:blur(4px);display:none}
+.confirm-wrap.show{display:flex}
+.confirm-box{background:var(--bg2);border:1px solid var(--b);border-radius:10px;padding:24px;
+  max-width:400px;width:90%;text-align:center}
+.confirm-box h3{font-size:15px;color:#fff;margin-bottom:8px}
+.confirm-box p{font-size:12px;color:var(--dim);margin-bottom:20px}
+.confirm-actions{display:flex;gap:10px;justify-content:center}
+
+/* ── Skel loader ── */
+.skel{background:linear-gradient(90deg,var(--bg3) 25%,var(--bg2) 50%,var(--bg3) 75%);
+      background-size:200%;animation:shimmer 1.4s infinite;border-radius:3px;height:16px}
+@keyframes shimmer{to{background-position:-200% 0}}
 
 /* ── Animations ── */
-@keyframes pulse-red{0%,100%{opacity:1}50%{opacity:.4}}
-@keyframes pulse-orange{0%,100%{opacity:1}50%{opacity:.6}}
+@keyframes p-red{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes p-amb{0%,100%{opacity:1}50%{opacity:.5}}
+@keyframes fi{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+.spin{display:inline-block;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.spin{display:inline-block;animation:spin .8s linear infinite}
-.fade-in{animation:fadeIn .3s ease}
-@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 
-/* ── Loader skeleton ── */
-.skel{
-  background:linear-gradient(90deg,var(--bg3) 25%,var(--bg2) 50%,var(--bg3) 75%);
-  background-size:200% 100%;animation:shimmer 1.4s infinite;
-  border-radius:4px;height:20px;width:80%;
-}
-@keyframes shimmer{to{background-position:-200% 0}}
+footer{padding:12px 20px;border-top:1px solid var(--b);display:flex;justify-content:space-between;
+       color:var(--dim);font-size:10px;margin-top:8px}
 </style>
 </head>
 <body>
 
-<!-- ══ HEADER ══════════════════════════════════════════════════════════════ -->
+<!-- ══ HEADER ═════════════════════════════════════════════════════════════ -->
 <header>
-  <div class="hdr-brand">
-    <div class="hdr-logo">Sneaker<span>Bot</span></div>
-    <div class="hdr-badge">Mission Control</div>
+  <div class="hbrand">
+    <div class="hlogo">Sneaker<span>Bot</span></div>
+    <div class="hv2">Elite Ops v2</div>
   </div>
-  <div class="hdr-right">
-    <span id="global-status-badge" class="badge-healthy">Chargement...</span>
+  <div class="hright">
+    <span id="gbadge" class="badge-healthy">—</span>
     <div id="clock">--:--:--</div>
-    <a href="/admin" class="btn btn-secondary" style="padding:5px 12px;font-size:11px">← Admin</a>
+    <a href="/admin" class="btn btn-s" style="padding:4px 10px">← Admin</a>
   </div>
 </header>
 
-<!-- ══ MAIN ═════════════════════════════════════════════════════════════════ -->
+<!-- ══ MAIN ═══════════════════════════════════════════════════════════════ -->
 <main>
 
-  <!-- STATUS BANNER -->
-  <div id="status-banner" class="green">
-    <div class="banner-icon" id="banner-icon">🟢</div>
-    <div class="banner-text">
-      <h2 id="banner-title">Chargement en cours…</h2>
-      <p id="banner-sub">Collecte des métriques système</p>
+<!-- STATUS BANNER -->
+<div id="banner" class="green">
+  <div class="b-icon" id="b-icon">🟢</div>
+  <div class="b-txt">
+    <h2 id="b-title">Chargement…</h2>
+    <p id="b-sub">Collecte des métriques système</p>
+  </div>
+  <div class="b-right">
+    <div class="b-time" id="b-time">—</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-g" id="diag-btn" onclick="runDiagnostic()">
+        <span id="diag-idle">▶ Diagnostic</span><span id="diag-spin" style="display:none"><span class="spin">↻</span> Analyse…</span>
+      </button>
+      <button class="btn btn-a" onclick="showConfirm('scraper-test')">⚡ Scraper Test</button>
+      <button class="btn btn-r" onclick="showConfirm('restart-scheduler')">↺ Restart Scheduler</button>
+      <button class="btn btn-s" onclick="refreshAll()" title="Rafraîchir tout">↺</button>
     </div>
-    <div class="banner-right">
-      <div class="banner-time" id="banner-time">—</div>
-      <div style="margin-top:6px;display:flex;gap:8px">
-        <button class="btn btn-primary" id="run-diag-btn" onclick="runDiagnostic()">
-          <span class="idle-text">▶ Run Diagnostic</span>
-          <span class="spin">↻</span><span class="spin" style="display:none"> Analyse…</span>
-        </button>
-        <button class="btn btn-secondary" onclick="refreshAll()" title="Rafraîchir">↺</button>
-      </div>
-    </div>
   </div>
+</div>
+<div id="dpanel">
+  <div class="stitle" style="margin-top:0">Résultats diagnostic</div>
+  <div class="dg-grid" id="dg-grid"></div>
+  <div class="stitle" style="margin-top:4px">Recommandations</div>
+  <ul class="reco-list" id="reco-list"></ul>
+</div>
 
-  <!-- DIAGNOSTIC PANEL (hidden by default) -->
-  <div id="diag-panel">
-    <div class="section-title">Résultats du diagnostic</div>
-    <div class="diag-grid" id="diag-grid"></div>
-    <div class="section-title" style="margin-top:0">Recommandations</div>
-    <ul class="reco-list" id="reco-list"></ul>
-  </div>
+<!-- ── SYSTEM RESOURCES ──────────────────────────── -->
+<div class="stitle">Ressources système</div>
+<div class="grid g5" id="sys-grid">
+  <div class="card"><div class="skel" style="width:60%"></div></div>
+  <div class="card"><div class="skel" style="width:60%"></div></div>
+  <div class="card"><div class="skel" style="width:60%"></div></div>
+  <div class="card"><div class="skel" style="width:60%"></div></div>
+  <div class="card"><div class="skel" style="width:60%"></div></div>
+</div>
 
-  <!-- ── SERVICES ── -->
-  <div class="section-title">Services</div>
-  <div class="grid grid-4" id="services-grid">
-    <div class="card"><div class="skel"></div></div>
-    <div class="card"><div class="skel"></div></div>
-    <div class="card"><div class="skel"></div></div>
-    <div class="card"><div class="skel"></div></div>
-  </div>
+<!-- ── SERVICES ──────────────────────────────────── -->
+<div class="stitle">Services</div>
+<div class="grid g4" id="svc-grid">
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+</div>
 
-  <!-- ── DATA FRESHNESS ── -->
-  <div class="section-title">Fraîcheur des données</div>
-  <div class="grid grid-2" id="data-grid">
-    <div class="card"><div class="skel"></div></div>
-    <div class="card"><div class="skel"></div></div>
-  </div>
+<!-- ── DATA FRESHNESS ────────────────────────────── -->
+<div class="stitle">Fraîcheur des données</div>
+<div class="grid g2" id="data-grid">
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+</div>
 
-  <!-- ── SOURCES ── -->
-  <div class="section-title">Analyse des sources</div>
-  <div class="grid grid-3" id="sources-grid">
-    <div class="card"><div class="skel"></div></div>
-    <div class="card"><div class="skel"></div></div>
-    <div class="card"><div class="skel"></div></div>
-  </div>
+<!-- ── SOURCE HEALTH PAR BRAND ───────────────────── -->
+<div class="stitle">Santé par brand</div>
+<div id="sh-wrap"><div class="card"><div class="skel"></div></div></div>
 
-  <!-- ── SERPAPI / CLÉS ── -->
-  <div class="section-title">Clés API &amp; Budget</div>
-  <div class="grid grid-2" id="keys-grid">
-    <div class="card"><div class="skel"></div></div>
-    <div class="card"><div class="skel"></div></div>
-  </div>
+<!-- ── API METRICS ───────────────────────────────── -->
+<div class="stitle">API Response Metrics</div>
+<div class="grid g3" id="metrics-grid">
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+</div>
 
-  <!-- ── ALERTS ── -->
-  <div class="section-title">Centre d'alertes</div>
-  <div id="alerts-container">
-    <div class="card"><div class="skel"></div></div>
-  </div>
+<!-- ── TIMELINE + ALERTS ─────────────────────────── -->
+<div class="stitle">Refresh Timeline &amp; Alertes</div>
+<div class="grid gcols">
+  <div class="card" id="timeline-card"><div class="skel"></div></div>
+  <div id="alerts-wrap"><div class="card"><div class="skel"></div></div></div>
+</div>
+
+<!-- ── SERPAPI + WATCHDOG + TELEGRAM ─────────────── -->
+<div class="stitle">Clés API · Watchdog · Telegram</div>
+<div class="grid g3" id="ops-row">
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+  <div class="card"><div class="skel"></div></div>
+</div>
+
+<!-- ── LIVE LOGS ──────────────────────────────────── -->
+<div class="stitle">
+  Live Logs
+  <span style="float:right;display:flex;gap:6px">
+    <button class="btn btn-s" style="padding:2px 8px;font-size:9px" onclick="refreshLogs()">↺ Refresh</button>
+  </span>
+</div>
+<div class="tabs" id="log-tabs">
+  <div class="tab active" onclick="switchTab('scraper')">scraper.log</div>
+  <div class="tab" onclick="switchTab('watchdog')">watchdog.log</div>
+  <div class="tab" onclick="switchTab('celery')">celery.log</div>
+</div>
+<div class="term" id="log-term">Chargement des logs…</div>
 
 </main>
 
 <footer>
-  <span>SneakerBot Mission Control © 2026</span>
-  <span id="footer-refresh">Dernière mise à jour : —</span>
+  <span>SneakerBot Elite Ops Cockpit · V2</span>
+  <span id="foot-ts">—</span>
 </footer>
 
-<!-- ══ JAVASCRIPT ════════════════════════════════════════════════════════════ -->
-<script>
-// ── Utilitaires ──────────────────────────────────────────────────────────────
+<!-- ══ CONFIRM OVERLAY ════════════════════════════════════════════════════ -->
+<div class="confirm-wrap" id="confirm-overlay">
+  <div class="confirm-box">
+    <h3 id="conf-title">Confirmation</h3>
+    <p id="conf-msg">Êtes-vous sûr ?</p>
+    <div class="confirm-actions">
+      <button class="btn btn-g" id="conf-ok" onclick="execAction()">Confirmer</button>
+      <button class="btn btn-s" onclick="hideConfirm()">Annuler</button>
+    </div>
+    <div id="conf-result" style="margin-top:12px;font-size:11px;color:var(--dim)"></div>
+  </div>
+</div>
 
+<!-- ══ JAVASCRIPT ═════════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ── safeFetchJson ─────────────────────────────────────────────────────────────
+// Ne jamais laisser un fetch planter le JS global.
+// Retourne {_err: code} si problème — jamais d'exception non catchée.
+async function safeFetchJson(url, opts={}) {
+  try {
+    const r = await fetch(url, opts);
+    if (r.status === 429) {
+      console.warn('[MC] 429 rate-limited:', url);
+      _showRateWarning();
+      return {_err: 429};
+    }
+    if (r.status === 401) { console.warn('[MC] 401:', url); return {_err: 401}; }
+    if (!r.ok) { console.warn('[MC]', r.status, url); return {_err: r.status}; }
+    const ct = r.headers.get('content-type') || '';
+    if (!ct.includes('json')) {
+      console.warn('[MC] réponse non-JSON depuis', url, '(content-type:', ct, ')');
+      return {_err: r.status, _notjson: true};
+    }
+    return await r.json();
+  } catch(e) {
+    console.warn('[MC] fetch error:', url, e.message);
+    return {_err: 0, _msg: e.message};
+  }
+}
+
+// Affiche un warning UI discret si rate-limited (pas d'écran critique).
+let _rateWarnTs = 0;
+function _showRateWarning() {
+  if (Date.now() - _rateWarnTs < 30000) return; // max 1 fois/30s
+  _rateWarnTs = Date.now();
+  const el = $('foot-ts');
+  if (el) el.innerHTML = '<span style="color:var(--amber)">⚠ Rate-limited — rafraîchissement ralenti</span>';
+}
+
+// Rendu de repli quand un endpoint échoue — jamais de CRITICAL global pour ça.
+function renderFallback(id, label='Données indisponibles') {
+  const el = $(id);
+  if (el) el.innerHTML = `<div class="card"><div class="cs" style="color:var(--dim);padding:8px 0">⚠ ${label}</div></div>`;
+}
+
+// ── Utilitaires ──────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
 
-function colorClass(c) {
-  if (c === 'green')  return 'green';
-  if (c === 'orange') return 'orange';
-  if (c === 'red')    return 'red';
-  return 'orange';
-}
-function dotClass(c)  { return 'status-dot dot-' + colorClass(c); }
-function tagClass(c)  { return 'card-tag tag-'  + colorClass(c); }
-function statusLabel(c) {
-  if (c === 'green')  return 'OK';
-  if (c === 'orange') return 'WARNING';
-  if (c === 'red')    return 'CRITICAL';
-  return 'UNKNOWN';
-}
-function colorIcon(c) {
-  if (c === 'green')  return '🟢';
-  if (c === 'orange') return '🟡';
-  if (c === 'red')    return '🔴';
-  return '⚪';
-}
-function fmtAge(min) {
-  if (min === undefined || min === null) return '—';
-  if (min < 60) return Math.round(min) + ' min';
-  return (min / 60).toFixed(1) + ' h';
-}
-function fmtPct(v) { return (v !== undefined && v !== null) ? v + '%' : '—'; }
-function fmtNum(v) { return (v !== undefined && v !== null) ? v.toLocaleString() : '—'; }
+const C = {
+  green:  'green',
+  orange: 'orange',
+  amber:  'orange',
+  red:    'red',
+  blue:   'blue',
+};
+function cc(c) { return C[c] || 'orange'; }
+function dotCls(c)  { const m={green:'dg',orange:'da',red:'dr'}; return 'dot '+(m[cc(c)]||'dd'); }
+function tagCls(c)  { const m={green:'tg',orange:'ta',red:'tr',blue:'tb'}; return 'tag '+(m[cc(c)]||'ta'); }
+function icon(c)    { return c==='green'?'🟢':c==='red'?'🔴':'🟡'; }
+function pct(v)     { return v!=null?v+'%':'—'; }
+function num(v)     { return v!=null?Number(v).toLocaleString('fr-FR'):'—'; }
+function ms(v)      { return v!=null?v+'ms':'—'; }
+function age(m)     { if(m==null)return'—'; return m<60?Math.round(m)+'min':(m/60).toFixed(1)+'h'; }
+function fillCls(c) { const m={green:'pfg',orange:'pfa',red:'pfr',blue:'pfb'}; return 'pf '+(m[cc(c)]||'pfa'); }
+function statusLbl(c){return c==='green'?'OK':c==='red'?'CRITICAL':'WARNING'}
 
-function makeCard(color, title, value, sub, extra = '') {
-  const c = colorClass(color);
-  return `<div class="card ${c} fade-in">
-    <div class="card-header">
-      <span class="card-title">${title}</span>
-      <span class="${dotClass(color)}"></span>
-    </div>
-    <div class="card-value">${value}</div>
-    <div class="card-sub">${sub}</div>
-    ${extra}
-  </div>`;
+function card(color,title,value,sub,extra=''){
+  const c=cc(color);
+  return`<div class="card ${c}">
+    <div class="ch"><span class="ct">${title}</span><span class="${dotCls(color)}"></span></div>
+    <div class="cv">${value}</div>
+    <div class="cs">${sub}</div>${extra}</div>`;
+}
+function pb(pct,color){
+  return`<div class="pb"><div class="${fillCls(color)}" style="width:${Math.min(100,pct)}%"></div></div>`;
 }
 
 // ── Clock ────────────────────────────────────────────────────────────────────
-function updateClock() {
-  const now = new Date();
-  $('clock').textContent = now.toLocaleTimeString('fr-FR');
-}
-setInterval(updateClock, 1000);
-updateClock();
+function tick(){$('clock').textContent=new Date().toLocaleTimeString('fr-FR')}
+setInterval(tick,1000);tick();
 
-// ── Status Banner ────────────────────────────────────────────────────────────
-function updateBanner(status, checkedAt) {
-  const banner = $('status-banner');
-  const c = status === 'healthy' ? 'green' : status === 'degraded' ? 'orange' : 'red';
-  banner.className = c;
-  $('banner-icon').textContent = colorIcon(c);
-  $('banner-title').textContent =
-    status === 'healthy'  ? 'Tous les systèmes opérationnels' :
-    status === 'degraded' ? 'Dégradation détectée' :
-                            'Incident critique en cours';
-  $('banner-sub').textContent =
-    status === 'healthy'  ? 'SneakerBot fonctionne normalement.' :
-    status === 'degraded' ? 'Un ou plusieurs services nécessitent votre attention.' :
-                            'Intervention requise immédiatement.';
-  if (checkedAt) {
-    const d = new Date(checkedAt);
-    $('banner-time').textContent = 'Mis à jour ' + d.toLocaleTimeString('fr-FR');
-  }
-  // Header badge
-  const badge = $('global-status-badge');
-  badge.className = 'badge-' + (status === 'healthy' ? 'healthy' : status === 'degraded' ? 'degraded' : 'critical');
-  badge.textContent = status.toUpperCase();
+// ── Banner ───────────────────────────────────────────────────────────────────
+function renderBanner(status, ts){
+  const s = status||'healthy';
+  const c = s==='healthy'?'green':s==='degraded'?'orange':'red';
+  const bn=$('banner'); bn.className=c;
+  $('b-icon').textContent=icon(c);
+  $('b-title').textContent=s==='healthy'?'Tous les systèmes opérationnels':s==='degraded'?'Dégradation détectée':'Incident critique';
+  $('b-sub').textContent=s==='healthy'?'SneakerBot fonctionne normalement.':s==='degraded'?'Un ou plusieurs services nécessitent votre attention.':'Intervention requise immédiatement.';
+  if(ts){const d=new Date(ts);$('b-time').textContent='Mis à jour '+d.toLocaleTimeString('fr-FR')}
+  const bg=$('gbadge');
+  bg.className='badge-'+(s==='healthy'?'healthy':s==='degraded'?'degraded':'critical');
+  bg.textContent=s.toUpperCase();
+}
+
+// ── System Resources ─────────────────────────────────────────────────────────
+function renderSystem(d){
+  if(!d||d.error){$('sys-grid').innerHTML=card('orange','System','ERR',d?.error||'Indisponible');return}
+  let h='';
+  // CPU
+  const cpuC=d.cpu_color||'orange';
+  h+=`<div class="card ${cc(cpuC)}">
+    <div class="ch"><span class="ct">CPU</span><span class="${dotCls(cpuC)}"></span></div>
+    <div class="cv">${d.cpu_pct!=null?d.cpu_pct+'%':'—'}</div>
+    ${pb(d.cpu_pct||0,cpuC)}
+    <div class="cs" style="margin-top:4px">Load ${d.load_1m} / ${d.load_5m} / ${d.load_15m}</div>
+  </div>`;
+  // RAM
+  const ramC=d.ram_color||'orange';
+  h+=`<div class="card ${cc(ramC)}">
+    <div class="ch"><span class="ct">RAM</span><span class="${dotCls(ramC)}"></span></div>
+    <div class="cv">${d.ram_pct!=null?d.ram_pct+'%':'—'}</div>
+    ${pb(d.ram_pct||0,ramC)}
+    <div class="cs" style="margin-top:4px">${d.ram_used_gb||'?'} GB / ${d.ram_total_gb||'?'} GB</div>
+  </div>`;
+  // Disk
+  const dkC=d.disk_color||'orange';
+  h+=`<div class="card ${cc(dkC)}">
+    <div class="ch"><span class="ct">Disk</span><span class="${dotCls(dkC)}"></span></div>
+    <div class="cv">${pct(d.disk_pct)}</div>
+    ${pb(d.disk_pct||0,dkC)}
+    <div class="cs" style="margin-top:4px">${d.disk_used_gb||'?'} GB / ${d.disk_total_gb||'?'} GB</div>
+  </div>`;
+  // Load
+  const loadC=d.load_1m>4?'red':d.load_1m>2?'orange':'green';
+  h+=`<div class="card ${cc(loadC)}">
+    <div class="ch"><span class="ct">System Load</span><span class="${dotCls(loadC)}"></span></div>
+    <div class="cv">${d.load_1m}</div>
+    <div class="cs">5m: ${d.load_5m} · 15m: ${d.load_15m}</div>
+    <span class="${tagCls(loadC)}" style="margin-top:8px">${statusLbl(loadC)}</span>
+  </div>`;
+  // Uptime
+  h+=`<div class="card green">
+    <div class="ch"><span class="ct">Uptime</span><span class="dot dg"></span></div>
+    <div class="cv" style="font-size:16px">${d.uptime||'—'}</div>
+    <div class="cs">Source : ${d.source||'?'}</div>
+    <span class="tag tg">ONLINE</span>
+  </div>`;
+  $('sys-grid').innerHTML=h;
 }
 
 // ── Services ─────────────────────────────────────────────────────────────────
-const SERVICE_LABELS = {
-  fastapi_backend:  'FastAPI Backend',
-  scheduler:        'Scheduler',
-  pricing_engine:   'Pricing Engine',
-  source_aggregator:'Source Aggregator',
-  celery_worker:    'Celery Worker',
-  playwright_scraper:'Playwright',
-  logs:             'Logs',
+const SVC_LABEL={
+  fastapi_backend:'FastAPI Backend',scheduler:'Scheduler',pricing_engine:'Pricing Engine',
+  source_aggregator:'Source Aggregator',celery_worker:'Celery Worker',
+  playwright_scraper:'Playwright',logs:'Logs',
 };
-
-function renderServices(data) {
-  let html = '';
-  for (const [key, info] of Object.entries(data)) {
-    const label = SERVICE_LABELS[key] || key;
-    const c = colorClass(info.color || 'orange');
-    let val = '—', sub = '';
-    if (key === 'fastapi_backend') { val = info.running ? 'RUNNING' : 'DOWN'; sub = info.note || ''; }
-    else if (key === 'scheduler')  { val = info.running ? 'RUNNING' : 'STOPPED'; sub = info.error || ''; }
-    else if (key === 'pricing_engine') { val = fmtNum(info.rows_available); sub = 'lignes disponibles'; }
-    else if (key === 'source_aggregator') { val = fmtNum(info.sources_count); sub = 'sources agrégées'; }
-    else if (key === 'celery_worker') { val = info.available ? info.count + ' worker(s)' : 'OFFLINE'; sub = (info.workers||[]).join(', ') || info.message || info.error || ''; }
-    else if (key === 'playwright_scraper') { val = info.installed ? 'INSTALLED' : 'N/A'; sub = info.note || ''; }
-    else if (key === 'logs') { val = fmtNum(info.error_count) + ' err'; sub = fmtNum(info.warning_count) + ' warnings'; }
-    html += makeCard(c, label, val, sub, `<span class="${tagClass(c)}">${statusLabel(c)}</span>`);
+function renderServices(d){
+  let h='';
+  for(const[k,v] of Object.entries(d)){
+    const c=cc(v.color||'orange');
+    let val='—',sub='';
+    if(k==='fastapi_backend'){val=v.running?'RUNNING':'DOWN';sub=v.note||''}
+    else if(k==='scheduler'){val=v.running?'RUNNING':'STOPPED';sub=v.error||''}
+    else if(k==='pricing_engine'){val=num(v.rows_available);sub='lignes disponibles'}
+    else if(k==='source_aggregator'){val=num(v.sources_count);sub='sources agrégées'}
+    else if(k==='celery_worker'){val=v.available?(v.count+' worker(s)'):'OFFLINE';sub=(v.workers||[]).join(', ')||v.message||v.error||''}
+    else if(k==='playwright_scraper'){val=v.installed?'INSTALLED':'N/A';sub=v.note||''}
+    else if(k==='logs'){val=num(v.error_count)+' err';sub=num(v.warning_count)+' warnings'}
+    h+=card(c,SVC_LABEL[k]||k,val,sub,`<span class="${tagCls(c)}">${statusLbl(c)}</span>`);
   }
-  $('services-grid').innerHTML = html;
+  $('svc-grid').innerHTML=h;
+  // Ajuster colonnes dynamiquement
+  const n=Object.keys(d).length;
+  $('svc-grid').className='grid '+(n<=4?'g4':n<=6?'g6':'g4');
 }
 
 // ── Data Freshness ────────────────────────────────────────────────────────────
-const CSV_LABELS = {
-  market_fr_csv:       'market_fr.csv',
-  market_fr_sources_csv: 'market_fr_sources.csv',
-};
-
-function renderData(data) {
-  let html = '';
-  for (const [key, info] of Object.entries(data.files || {})) {
-    const label = CSV_LABELS[key] || key;
-    const c = colorClass(info.color || info.status || 'orange');
-    if (!info.exists) {
-      html += makeCard('red', label, 'ABSENT', info.message || 'Fichier manquant', `<span class="${tagClass('red')}">CRITICAL</span>`);
-      continue;
-    }
-    const pct = info.age_minutes ? Math.min(100, Math.round(info.age_minutes / 720 * 100)) : 0;
-    const fillClass = c === 'green' ? 'fill-green' : c === 'orange' ? 'fill-orange' : 'fill-red';
-    const extra = `
-      <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
-      <div style="display:flex;justify-content:space-between;margin-top:8px">
-        <span class="${tagClass(c)}">${statusLabel(c)}</span>
-        <span style="font-size:10px;color:var(--text-dim)">${info.size_kb || '?'} KB · ${fmtNum(info.rows)} lignes</span>
+const CSV_LBL={market_fr_csv:'market_fr.csv',market_fr_sources_csv:'market_fr_sources.csv'};
+function renderData(d){
+  let h='';
+  for(const[k,f] of Object.entries(d.files||{})){
+    const c=f.color||f.status||'orange';
+    if(!f.exists){h+=card('red',CSV_LBL[k]||k,'ABSENT',f.message||'',`<span class="${tagCls('red')}">CRITICAL</span>`);continue}
+    const pctAge=Math.min(100,Math.round((f.age_minutes||0)/720*100));
+    const extra=`${pb(pctAge,c)}
+      <div style="display:flex;justify-content:space-between;margin-top:6px">
+        <span class="${tagCls(c)}">${statusLbl(c)}</span>
+        <span style="font-size:10px;color:var(--dim)">${f.size_kb||'?'} KB · ${num(f.rows)} lignes</span>
       </div>`;
-    html += makeCard(c, label, fmtAge(info.age_minutes), `Mis à jour : ${info.updated_at || '—'}`, extra);
+    h+=card(c,CSV_LBL[k]||k,age(f.age_minutes),`Maj : ${f.updated_at||'—'}`,extra);
   }
-  $('data-grid').innerHTML = html;
+  $('data-grid').innerHTML=h;
 }
 
-// ── Sources ───────────────────────────────────────────────────────────────────
-function renderSources(data) {
-  if (!data.exists) {
-    $('sources-grid').innerHTML = makeCard('red','Sources','ABSENT', data.message||'');
+// ── Source Health par Brand ───────────────────────────────────────────────────
+function renderSourceHealth(d){
+  const brands=d.brands||{};
+  if(!Object.keys(brands).length){
+    $('sh-wrap').innerHTML=`<div class="card orange"><div class="ch"><span class="ct">Brands</span></div><div class="cs">${d.error||'Aucune donnée'}</div></div>`;
     return;
   }
-  const c = colorClass(data.color || 'green');
-  let html = '';
-  html += makeCard(c, 'Total sources', fmtNum(data.total_sources), 'entrées dans le fichier', `<span class="${tagClass(c)}">${statusLabel(c)}</span>`);
-  html += makeCard('green', 'Boutiques distinctes', fmtNum(data.distinct_shops), 'shops uniques détectés');
-  const invC = data.invalid_prices > 0 ? 'red' : 'green';
-  const suspC = data.suspect_sources > 10 ? 'orange' : 'green';
-  html += `<div class="card fade-in ${colorClass(invC === 'red' || suspC === 'orange' ? invC : 'green')}">
-    <div class="card-header"><span class="card-title">Qualité</span><span class="${dotClass(invC)}"></span></div>
-    <table class="metric-table" style="margin-top:4px">
-      <tr><td style="color:var(--text-dim)">Sources valides</td><td>${fmtNum(data.valid_sources)}</td></tr>
-      <tr><td style="color:var(--text-dim)">Suspectes</td><td style="color:${data.suspect_sources>10?'var(--orange)':'inherit'}">${fmtNum(data.suspect_sources)}</td></tr>
-      <tr><td style="color:var(--text-dim)">Prix invalides</td><td style="color:${data.invalid_prices>0?'var(--red)':'inherit'}">${fmtNum(data.invalid_prices)}</td></tr>
-    </table>
-  </div>`;
-  $('sources-grid').innerHTML = html;
-}
-
-// ── Keys / SerpAPI ────────────────────────────────────────────────────────────
-function renderKeys(data) {
-  const serp = data.serpapi || {};
-  const sc = colorClass(serp.color || 'orange');
-  const usedPct = serp.used_pct || 0;
-  const fillClass = sc === 'green' ? 'fill-green' : sc === 'orange' ? 'fill-orange' : 'fill-red';
-
-  let serpHtml = `<div class="card ${sc} fade-in">
-    <div class="card-header"><span class="card-title">SerpAPI Budget</span><span class="${dotClass(sc)}"></span></div>
-    <div class="card-value">${fmtNum(serp.calls_this_month)}<span style="font-size:14px;color:var(--text-dim)"> / ${fmtNum(serp.monthly_cap)}</span></div>
-    <div class="card-sub">Mode : <strong>${serp.mode || '—'}</strong> · Moy. journalière : ${serp.daily_average || '—'}</div>
-    <div class="progress-bar" style="margin-top:10px"><div class="progress-fill ${fillClass}" style="width:${usedPct}%"></div></div>
-    <div style="display:flex;justify-content:space-between;margin-top:6px">
-      <span class="${tagClass(sc)}">${fmtPct(usedPct)} utilisé</span>
-      <span style="font-size:10px;color:var(--text-dim)">${fmtNum(serp.remaining)} restants (${fmtPct(serp.remaining_pct)})</span>
-    </div>
-    <div style="margin-top:8px;font-size:11px;color:var(--text-dim)">Clé : ${serp.key_present ? '✓ présente' : '✗ absente'} · Mois : ${serp.month || '—'}</div>
-  </div>`;
-
-  // Autres clés
-  let otherRows = '';
-  for (const [k, v] of Object.entries(data.other || {})) {
-    const oc = colorClass(v.color || 'orange');
-    otherRows += `<tr>
-      <td>${k}</td>
-      <td><span class="${tagClass(oc)}">${v.present ? 'Présente' : 'Absente'}</span></td>
-    </tr>`;
-  }
-  let otherHtml = `<div class="card fade-in">
-    <div class="card-header"><span class="card-title">Autres clés API</span><span class="status-dot"></span></div>
-    <table class="metric-table">
-      <thead><tr><th>Variable</th><th>État</th></tr></thead>
-      <tbody>${otherRows || '<tr><td colspan="2" style="color:var(--text-dim)">Aucune détectée</td></tr>'}</tbody>
-    </table>
-    <div style="margin-top:10px;font-size:10px;color:var(--text-dim)">${data.warning||''}</div>
-  </div>`;
-
-  $('keys-grid').innerHTML = serpHtml + otherHtml;
-}
-
-// ── Alerts ────────────────────────────────────────────────────────────────────
-function renderAlerts(data) {
-  const alerts = data.alerts || [];
-  if (!alerts.length) {
-    $('alerts-container').innerHTML = `<div class="card green fade-in"><div class="card-header"><span class="card-title">Alertes</span><span class="status-dot dot-green"></span></div><div style="color:var(--green);padding:8px 0">✓ Aucune alerte active</div></div>`;
-    return;
-  }
-  const summary = `<div style="display:flex;gap:10px;margin-bottom:12px">
-    ${data.critical_count ? `<span class="${tagClass('red')}">${data.critical_count} critique(s)</span>` : ''}
-    ${data.warning_count  ? `<span class="${tagClass('orange')}">${data.warning_count} warning(s)</span>` : ''}
-    ${data.info_count     ? `<span class="${tagClass('blue')}">${data.info_count} info</span>` : ''}
-  </div>`;
-
-  let items = '';
-  for (const a of alerts) {
-    const cls = a.type === 'critical' ? 'alert-critical' : a.type === 'warning' ? 'alert-warning' : 'alert-info';
-    const icon = a.type === 'critical' ? '🔴' : a.type === 'warning' ? '🟡' : 'ℹ️';
-    const ts = a.timestamp ? new Date(a.timestamp).toLocaleTimeString('fr-FR') : '';
-    items += `<div class="alert-item ${cls}">
-      <span class="alert-icon">${icon}</span>
-      <div class="alert-body">
-        <p>${a.message || ''}</p>
-        ${a.suggestion ? `<small>💡 ${a.suggestion}</small>` : ''}
-      </div>
-      <span class="alert-source">${a.source || ''}<br>${ts}</span>
+  let h='<div class="sh-grid">';
+  for(const[brand,b] of Object.entries(brands)){
+    const c=cc(b.color||'green');
+    h+=`<div class="sh-card ${c}">
+      <div class="sh-brand">${brand}</div>
+      <div class="sh-meta">${num(b.rows)} lignes · ${num(b.shops)} shops</div>
+      <div class="sh-meta" style="margin-top:2px">Moy : ${b.avg_price!=null?b.avg_price+'€':'—'} · Min : ${b.min_price!=null?b.min_price+'€':'—'}</div>
     </div>`;
   }
-  $('alerts-container').innerHTML = `<div class="card fade-in">${summary}${items}</div>`;
+  h+='</div>';
+  $('sh-wrap').innerHTML=h;
+}
+
+// ── API Metrics ───────────────────────────────────────────────────────────────
+const METRIC_LBL={health:'/health',data_build:'CSV Build',serpapi_budget:'SerpAPI Budget'};
+function renderMetrics(d){
+  const eps=d.endpoints||{};
+  let h='';
+  for(const[k,v] of Object.entries(eps)){
+    const c=v.color||'orange';
+    h+=`<div class="card ${cc(c)} glass">
+      <div class="ch"><span class="ct">${METRIC_LBL[k]||k}</span><span class="${dotCls(c)}"></span></div>
+      <div class="cv" style="font-size:20px">${ms(v.elapsed_ms)}</div>
+      <div class="cs">${v.note||'HTTP '+v.status_code||''}</div>
+      <span class="${tagCls(c)}">${v.status_code||''} ${statusLbl(c)}</span>
+    </div>`;
+  }
+  $('metrics-grid').innerHTML=h||'<div class="card orange"><div class="cs">Aucune métrique</div></div>';
+}
+
+// ── Refresh Timeline ──────────────────────────────────────────────────────────
+const TYPE_ICON={full_refresh:'⚡',serp_sync:'🔄',status_file:'📋'};
+function renderTimeline(d){
+  const evts=d.events||[];
+  let h='<div class="ch"><span class="ct">Refresh Timeline</span></div><div class="tl-wrap">';
+  if(!evts.length){h+='<div class="cs">Aucun événement trouvé</div>';}
+  for(const e of evts){
+    const c=cc(e.color||'green');
+    const dotC=c==='green'?'dg':c==='red'?'dr':'da';
+    h+=`<div class="tl-item">
+      <span class="dot ${dotC}" style="margin-top:4px"></span>
+      <div class="tl-body">
+        <div class="tl-time">${e.time||'—'} ${e.running?'<span class="tag ta">EN COURS</span>':''}</div>
+        <div class="tl-msg">${TYPE_ICON[e.type]||'•'} ${e.message||''}</div>
+        <span class="${tagCls(e.color)}" style="margin-top:2px">${e.status||''}</span>
+      </div>
+    </div>`;
+  }
+  h+='</div>';
+  $('timeline-card').innerHTML=h;
+}
+
+// ── Alerts ───────────────────────────────────────────────────────────────────
+function renderAlerts(d){
+  const alerts=d.alerts||[];
+  let h='';
+  if(!alerts.length){
+    $('alerts-wrap').innerHTML=`<div class="card green"><div class="ch"><span class="ct">Alertes</span><span class="dot dg"></span></div><div class="cs" style="color:var(--green);padding:4px 0">✓ Aucune alerte active</div></div>`;
+    return;
+  }
+  const sum=`<div style="display:flex;gap:6px;margin-bottom:8px">
+    ${d.critical_count?`<span class="tag tr">${d.critical_count} critique(s)</span>`:''}
+    ${d.warning_count?`<span class="tag ta">${d.warning_count} warning(s)</span>`:''}
+    ${d.info_count?`<span class="tag tb">${d.info_count} info</span>`:''}
+  </div>`;
+  for(const a of alerts){
+    const cls=a.type==='critical'?'al-crit':a.type==='warning'?'al-warn':'al-info';
+    const ic=a.type==='critical'?'🔴':a.type==='warning'?'🟡':'ℹ️';
+    const ts=a.timestamp?new Date(a.timestamp).toLocaleTimeString('fr-FR'):'';
+    h+=`<div class="alert ${cls}">
+      <span class="al-icon">${ic}</span>
+      <div class="al-body"><p>${a.message||''}</p>${a.suggestion?`<small>💡 ${a.suggestion}</small>`:''}</div>
+      <span class="al-src">${a.source||''}<br>${ts}</span>
+    </div>`;
+  }
+  $('alerts-wrap').innerHTML=`<div class="card">${sum}${h}</div>`;
+}
+
+// ── Ops Row : SerpAPI + Watchdog + Telegram ───────────────────────────────────
+function renderOpsRow(keys,watchdog,telegram){
+  let h='';
+
+  // SerpAPI
+  const serp=keys.serpapi||{};
+  const sc=cc(serp.color||'orange');
+  const usedPct=serp.used_pct||0;
+  h+=`<div class="card ${sc} glass">
+    <div class="ch"><span class="ct">SerpAPI Budget</span><span class="${dotCls(serp.color||'orange')}"></span></div>
+    <div class="cv" style="font-size:16px">${num(serp.calls_this_month)}<span style="font-size:11px;color:var(--dim)"> / ${num(serp.monthly_cap)}</span></div>
+    ${pb(usedPct,sc)}
+    <div style="display:flex;justify-content:space-between;margin-top:5px">
+      <span class="${tagCls(sc)}">${pct(usedPct)} · ${serp.mode||'?'}</span>
+      <span style="font-size:10px;color:var(--dim)">${num(serp.remaining)} restants</span>
+    </div>
+    <div style="margin-top:5px;font-size:10px;color:var(--dim)">Clé : ${serp.key_present?'✓ présente':'✗ absente'} · Moy/j : ${serp.daily_average||'—'}</div>
+  </div>`;
+
+  // Watchdog
+  const wc=cc(watchdog.color||'orange');
+  h+=`<div class="card ${wc}">
+    <div class="ch"><span class="ct">Watchdog</span><span class="${dotCls(watchdog.color||'orange')}"></span></div>
+    <div class="cv" style="font-size:16px">${(watchdog.status||'unknown').toUpperCase()}</div>
+    <div class="cs">Activité : ${watchdog.last_activity||'—'}</div>
+    <div class="cs">Âge : ${age(watchdog.age_minutes)} · ${num(watchdog.total_lines)} lignes</div>
+    <span class="${tagCls(watchdog.color||'orange')}" style="margin-top:6px">${statusLbl(watchdog.color||'orange')}</span>
+  </div>`;
+
+  // Telegram
+  const tgCfg=telegram||{};
+  const tgC=tgCfg.configured?'green':'orange';
+  h+=`<div class="card ${cc(tgC)}">
+    <div class="ch"><span class="ct">Telegram Alerts</span><span class="${dotCls(tgC)}"></span></div>
+    <div class="cv" style="font-size:16px">${tgCfg.configured?'CONFIGURED':'NOT SET'}</div>
+    <div class="cs">${tgCfg.message||'BOT_TOKEN + CHAT_ID requis'}</div>
+    ${tgCfg.configured?`<button class="btn btn-g" style="margin-top:8px;padding:3px 10px;font-size:10px" onclick="testTelegram()">📨 Test</button>`:''}
+    <span class="${tagCls(tgC)}" style="margin-top:6px">${tgCfg.configured?'READY':'NOT_CONFIGURED'}</span>
+  </div>`;
+
+  $('ops-row').innerHTML=h;
+}
+
+// ── Live Logs ─────────────────────────────────────────────────────────────────
+let _logsCache={};
+let _activeTab='scraper';
+
+function switchTab(name){
+  _activeTab=name;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.textContent.startsWith(name)));
+  renderTab(name);
+}
+
+function renderTab(name){
+  const src=_logsCache[name];
+  const term=$('log-term');
+  if(!src||!src.available){
+    term.innerHTML=`<span style="color:var(--dim)">— ${name}.log non disponible —</span>`;
+    return;
+  }
+  const html=(src.lines||[]).map(l=>{
+    let cls='ln-other';
+    if(/\bERROR\b|\bCRITICAL\b/.test(l))cls='ln-err';
+    else if(/\bWARNING\b|\bWARN\b/.test(l))cls='ln-warn';
+    else if(/\bINFO\b| OK /.test(l))cls='ln-info';
+    return`<div class="${cls}">${l.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
+  }).join('');
+  term.innerHTML=html||'<span style="color:var(--dim)">— vide —</span>';
+  term.scrollTop=term.scrollHeight;
 }
 
 // ── Diagnostic ────────────────────────────────────────────────────────────────
-async function runDiagnostic() {
-  const btn = $('run-diag-btn');
-  btn.disabled = true;
-  btn.classList.add('loading');
-  $('diag-panel').classList.remove('visible');
-
-  try {
-    const r = await fetch('/api/mission/diagnostic');
-    const d = await r.json();
-
-    // Grille de statuts
-    const checks = [
-      ['Backend',   d.backend?.color,    d.backend?.ok ? 'OK' : 'DOWN'],
-      ['Scheduler', d.scheduler?.color,  d.scheduler?.running ? 'RUNNING' : 'STOPPED'],
-      ['Pricing',   d.pricing?.color,    d.pricing?.rows + ' lignes'],
-      ['SerpAPI',   d.keys?.serpapi?.color, d.keys?.serpapi?.mode + ' · ' + fmtPct(d.keys?.serpapi?.used_pct)],
-      ['Celery',    d.celery?.color,     d.celery?.available ? 'ACTIVE' : 'OFFLINE'],
-      ['Logs',      d.logs?.color,       d.logs?.error_count + ' erreurs'],
+async function runDiagnostic(){
+  $('diag-btn').disabled=true;
+  $('diag-idle').style.display='none';
+  $('diag-spin').style.display='inline';
+  $('dpanel').classList.remove('show');
+  const d = await safeFetchJson('/api/mission/diagnostic');
+  if(d._err){
+    $('reco-list').innerHTML=`<li class="reco-c">⚠ Diagnostic indisponible (${d._err}) — réessayer dans quelques secondes</li>`;
+  } else {
+    const checks=[
+      ['Backend',  d.backend?.color,   d.backend?.ok?'OK':'DOWN'],
+      ['Scheduler',d.scheduler?.color, d.scheduler?.running?'RUNNING':'STOPPED'],
+      ['Pricing',  d.pricing?.color,   num(d.pricing?.rows)+' lignes'],
+      ['SerpAPI',  d.keys?.serpapi?.color, (d.keys?.serpapi?.mode||'?')+' '+pct(d.keys?.serpapi?.used_pct)],
+      ['Celery',   d.celery?.color,    d.celery?.available?'ACTIVE':'OFFLINE'],
+      ['Logs',     d.logs?.color,      num(d.logs?.error_count)+' erreurs'],
     ];
-    let gridHtml = '';
-    for (const [label, color, val] of checks) {
-      const c = colorClass(color || 'orange');
-      gridHtml += `<div class="diag-item">
-        <span class="${dotClass(c)}"></span>
-        <div><div class="label">${label}</div><div class="val">${val || '—'}</div></div>
-      </div>`;
-    }
-    $('diag-grid').innerHTML = gridHtml;
-
-    // Recommandations
-    const recos = d.recommendations || ['Aucune recommandation.'];
-    const recoHtml = recos.map(r => {
-      const ok   = r.toLowerCase().includes('aucune action') || r.toLowerCase().includes('opérationnel');
-      const crit = r.toLowerCase().includes('critique') || r.toLowerCase().includes('urgent');
-      const cls  = ok ? 'reco-ok' : crit ? 'reco-crit' : 'reco-warn';
-      const pfx  = ok ? '✓' : crit ? '⚠' : '→';
-      return `<li class="${cls}">${pfx} ${r}</li>`;
+    $('dg-grid').innerHTML=checks.map(([lbl,c,val])=>`
+      <div class="dg-item"><span class="${dotCls(c||'orange')}"></span>
+        <div><div class="label">${lbl}</div><div class="val">${val||'—'}</div></div>
+      </div>`).join('');
+    $('reco-list').innerHTML=(d.recommendations||[]).map(r=>{
+      const ok=r.includes('opérationnel')||r.includes('Aucune action');
+      const crit=r.toLowerCase().includes('critique')||r.toLowerCase().includes('urgent');
+      return`<li class="${ok?'reco-ok':crit?'reco-c':'reco-w'}">${ok?'✓':crit?'⚠':'→'} ${r}</li>`;
     }).join('');
-    $('reco-list').innerHTML = recoHtml;
-
-    $('diag-panel').classList.add('visible');
-  } catch(e) {
-    $('reco-list').innerHTML = `<li class="reco-crit">⚠ Erreur lors du diagnostic : ${e.message}</li>`;
-    $('diag-panel').classList.add('visible');
-  } finally {
-    btn.disabled = false;
-    btn.classList.remove('loading');
   }
+  $('dpanel').classList.add('show');
+  $('diag-btn').disabled=false;
+  $('diag-idle').style.display='inline';
+  $('diag-spin').style.display='none';
 }
 
-// ── Refresh principal ─────────────────────────────────────────────────────────
-async function refreshAll() {
-  try {
-    const [statusR, servicesR, dataR, keysR, sourcesR, alertsR] = await Promise.all([
-      fetch('/api/mission/status').then(r=>r.json()),
-      fetch('/api/mission/services').then(r=>r.json()),
-      fetch('/api/mission/data').then(r=>r.json()),
-      fetch('/api/mission/keys').then(r=>r.json()),
-      fetch('/api/mission/sources').then(r=>r.json()),
-      fetch('/api/mission/alerts').then(r=>r.json()),
-    ]);
-    updateBanner(statusR.status || 'healthy', statusR.checked_at);
-    renderServices(servicesR);
-    renderData(dataR);
-    renderSources(sourcesR);
-    renderKeys(keysR);
-    renderAlerts(alertsR);
-    const now = new Date();
-    $('footer-refresh').textContent = 'Dernière mise à jour : ' + now.toLocaleTimeString('fr-FR');
-  } catch(e) {
-    console.error('refreshAll error:', e);
-    updateBanner('critical', null);
+// ── Confirm + Actions ─────────────────────────────────────────────────────────
+let _pendingAction=null;
+const ACTION_CFG={
+  'scraper-test':       {title:'Scraper Test',   msg:'Lance un test léger du pipeline (aucun scrape réel).'},
+  'restart-scheduler':  {title:'Restart Scheduler', msg:'Redémarre APScheduler si arrêté. Action réversible.'},
+};
+
+function showConfirm(action){
+  _pendingAction=action;
+  const cfg=ACTION_CFG[action]||{title:action,msg:'Confirmer ?'};
+  $('conf-title').textContent=cfg.title;
+  $('conf-msg').textContent=cfg.msg;
+  $('conf-result').textContent='';
+  $('conf-ok').disabled=false;
+  $('confirm-overlay').classList.add('show');
+}
+function hideConfirm(){_pendingAction=null;$('confirm-overlay').classList.remove('show')}
+
+async function execAction(){
+  if(!_pendingAction)return;
+  $('conf-ok').disabled=true;
+  $('conf-result').textContent='Exécution…';
+  const method=['scraper-test','restart-scheduler'].includes(_pendingAction)?'POST':'GET';
+  const d=await safeFetchJson(`/api/mission/actions/${_pendingAction}`,{method});
+  if(d._err){
+    $('conf-result').innerHTML=`<span style="color:var(--red)">✗ Erreur ${d._err} — ${d._msg||''}</span>`;
+  } else {
+    $('conf-result').innerHTML=`<span style="color:var(--green)">✓ ${d.status||'OK'} — ${d.message||d.note||''}</span>`;
+    if(d.checks){
+      const rows=Object.entries(d.checks).map(([k,v])=>`${k}: ${v.ok?'✓':'✗'}`).join(' · ');
+      $('conf-result').innerHTML+=`<br><small style="color:var(--dim)">${rows}</small>`;
+    }
   }
+  $('conf-ok').disabled=false;
 }
 
-// ── Init & auto-refresh ───────────────────────────────────────────────────────
+// Telegram : UNIQUEMENT sur clic bouton, jamais en auto.
+async function testTelegram(){
+  const btn=event?.target; if(btn)btn.disabled=true;
+  const d=await safeFetchJson('/api/mission/telegram-test');
+  if(btn)btn.disabled=false;
+  if(d._err){ alert('Erreur réseau ('+d._err+')'); return; }
+  if(!d.configured){ alert('Telegram non configuré (variables manquantes)'); return; }
+  alert(d.test_result?.sent?'✓ Message Telegram envoyé !':'✗ Échec: '+(d.test_result?.error||'inconnu'));
+}
+
+// ── Refresh global — batches séquentiels, max 3 concurrents ──────────────────
+// On ne lance JAMAIS telegram-test ni logs en auto.
+const _delay = ms => new Promise(r => setTimeout(r, ms));
+
+async function refreshAll(){
+  // Batch 1 — critique (3 requêtes) ─────────────────
+  const [st, sv, da] = await Promise.all([
+    safeFetchJson('/api/mission/status'),
+    safeFetchJson('/api/mission/services'),
+    safeFetchJson('/api/mission/data'),
+  ]);
+  if (!st._err) renderBanner(st.status, st.checked_at);
+  if (!sv._err) renderServices(sv); else renderFallback('svc-grid','Services indisponibles');
+  if (!da._err) renderData(da);    else renderFallback('data-grid','CSV indisponible');
+
+  await _delay(250);
+
+  // Batch 2 — système + budget + alertes (3 requêtes) ─
+  const [sys, ke, al] = await Promise.all([
+    safeFetchJson('/api/mission/system'),
+    safeFetchJson('/api/mission/keys'),
+    safeFetchJson('/api/mission/alerts'),
+  ]);
+  if (!sys._err) renderSystem(sys); else renderFallback('sys-grid','Système indisponible');
+  if (!al._err)  renderAlerts(al);  else renderFallback('alerts-wrap','Alertes indisponibles');
+
+  await _delay(250);
+
+  // Batch 3 — secondaire (3 requêtes) ─────────────────
+  const [tl, wdg, sh] = await Promise.all([
+    safeFetchJson('/api/mission/refresh-timeline'),
+    safeFetchJson('/api/mission/watchdog'),
+    safeFetchJson('/api/mission/source-health'),
+  ]);
+  if (!tl._err) renderTimeline(tl); else renderFallback('timeline-card','Timeline indisponible');
+  if (!sh._err) renderSourceHealth(sh); else renderFallback('sh-wrap','Source health indisponible');
+
+  // Ops row : données consolidées (telegram = jamais auto-fetché)
+  renderOpsRow(
+    ke._err  ? {} : ke,
+    wdg._err ? {exists:false, color:'orange', status:'unknown', age_minutes:null} : wdg,
+    {configured: false}   // telegram state inconnu jusqu'au clic bouton
+  );
+
+  $('foot-ts').textContent = 'Maj : ' + new Date().toLocaleTimeString('fr-FR');
+}
+
+// Métriques : refresh lent (2 min), pas critique ─────
+async function refreshMetrics(){
+  const m = await safeFetchJson('/api/mission/metrics');
+  if (!m._err) renderMetrics(m); else renderFallback('metrics-grid','Métriques indisponibles');
+}
+
+// Logs : lazy, uniquement sur clic bouton ou premier chargement ───────────────
+async function refreshLogs(){
+  const d = await safeFetchJson('/api/mission/logs?limit=80');
+  if(d._err){ $('log-term').innerHTML=`<span style="color:var(--amber)">⚠ Logs indisponibles (${d._err})</span>`; return; }
+  _logsCache = d;
+  renderTab(_activeTab);
+}
+
+// ── Alias helpers (noms sémantiques exposés globalement) ─────────────────────
+function runScraperTest()    { showConfirm('scraper-test'); }
+function restartScheduler()  { showConfirm('restart-scheduler'); }
+function refreshMissionControl() { refreshAll(); }
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+// Ordre : refresh critique d'abord, métriques après, logs une seule fois.
+// Telegram : jamais en auto.
 refreshAll();
-setInterval(refreshAll, 30000); // auto-refresh toutes les 30s
+setTimeout(refreshMetrics, 2000);       // métriques légèrement différées
+setTimeout(refreshLogs, 3000);          // logs une seule fois au chargement
+
+setInterval(refreshAll, 60000);         // cockpit : 60s (pas 30s)
+setInterval(refreshMetrics, 120000);    // métriques : 2 min
+// logs : PAS de setInterval — uniquement bouton manuel
 </script>
 </body>
 </html>

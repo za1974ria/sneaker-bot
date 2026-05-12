@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ product_title }} | Sneakerbot.shop</title>
+  <meta name="description" content="Détail prix {{ product_title }} : min, max, moyenne et signal marché sur Sneakerbot.shop.">
+  <link rel="canonical" href="{{ canonical_url or 'https://sneakerbot.shop/product' }}">
+  <meta property="og:type" content="product">
+  <meta property="og:title" content="{{ product_title }} | Sneakerbot.shop">
+  <meta property="og:description" content="Analyse de prix et signal marché pour {{ product_title }}.">
+  <meta property="og:url" content="{{ canonical_url or 'https://sneakerbot.shop/product' }}">
+  <meta property="og:image" content="{{ og_image or 'https://sneakerbot.shop/static/favicon.svg' }}">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Product",
+    "name": "{{ product_title }}",
+    "brand": "{{ brand }}",
+    "sku": "{{ model }}",
+    "offers": {
+      "@type": "Offer",
+      "priceCurrency": "EUR",
+      "price": "{{ '%.2f'|format(avg) }}",
+      "availability": "https://schema.org/InStock"
+    }
+  }
+  </script>
+</head>
+<body style="margin:0;min-height:100vh;background:#0b0b0b;color:#fff;font-family:ui-sans-serif;display:flex;align-items:center;justify-content:center;padding:1rem;">
+<article style="width:100%;max-width:720px;border:1px solid #232323;border-radius:18px;background:#111;padding:1.2rem;">
+<h1 style="margin:0 0 .5rem;">{{ product_title }}</h1>
+<p>{{ signal_display }}</p>
+<p>Prix moyen: {{ "%.2f"|format(avg) }} €</p>
+<p>Variation: {{ "%.2f"|format(variation) }} €</p>
+<p>Tendance: {{ trend }}</p>
+<p>Score: {{ score }}/5</p>
+<p>Brand: {{ brand }} | Model: {{ model }}</p>
+<p>Shops: {{ shops }}</p>
+<table style="width:100%;border-collapse:collapse;margin:.45rem 0 .75rem;">
+  <thead><tr><th style="text-align:left;">Pays</th><th style="text-align:left;">Min</th><th style="text-align:left;">Max</th><th style="text-align:left;">Avg</th></tr></thead>
+  <tbody>
+    <tr><td>FR</td><td>{{ "%.2f"|format(price_min_fr) }} €</td><td>{{ "%.2f"|format(price_max_fr) }} €</td><td>{{ "%.2f"|format(price_avg_fr) }} €</td></tr>
+    <tr><td>BE</td><td>{{ "%.2f"|format(price_min_be) }} €</td><td>{{ "%.2f"|format(price_max_be) }} €</td><td>{{ "%.2f"|format(price_avg_be) }} €</td></tr>
+    <tr><td>LU</td><td>{{ "%.2f"|format(price_min_lu) }} €</td><td>{{ "%.2f"|format(price_max_lu) }} €</td><td>{{ "%.2f"|format(price_avg_lu) }} €</td></tr>
+  </tbody>
+</table>
+<p><strong>{{ arb_signal }}</strong></p>
+<p>{{ arb_message }} | Δ {{ "%.2f"|format(arb_difference) }} €</p>
+<p><strong>Market Insight:</strong> {{ insight }}</p>
+<p><a href="/" style="color:#9ae6b4;">← Retour à la liste</a></p>
+</article>
+</body>
+</html>

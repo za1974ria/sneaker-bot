@@ -6,7 +6,7 @@ import random
 from datetime import datetime
 from pathlib import Path
 
-import requests
+from scrapers.utils.fetch_retry import fetch_url_get
 
 
 _BLOCK_PATTERNS = (
@@ -72,8 +72,14 @@ def realistic_headers() -> dict[str, str]:
 
 def fetch_with_rotating_headers(url: str, timeout: int = 20) -> str:
     try:
-        r = requests.get(url, headers=realistic_headers(), timeout=timeout, allow_redirects=True)
-        if r.status_code >= 400:
+        r = fetch_url_get(
+            url,
+            headers=realistic_headers(),
+            timeout=float(timeout),
+            attempts=3,
+            allow_redirects=True,
+        )
+        if r is None or r.status_code >= 400:
             return ""
         return r.text or ""
     except Exception:
@@ -134,12 +140,13 @@ def fetch_via_scraperapi(url: str, timeout: int = 35) -> str:
         return ""
     endpoint = "http://api.scraperapi.com/"
     try:
-        r = requests.get(
+        r = fetch_url_get(
             endpoint,
             params={"api_key": key, "url": url, "country_code": "fr", "keep_headers": "true"},
-            timeout=timeout,
+            timeout=float(timeout),
+            attempts=3,
         )
-        if r.status_code >= 400:
+        if r is None or r.status_code >= 400:
             return ""
         return r.text or ""
     except Exception:

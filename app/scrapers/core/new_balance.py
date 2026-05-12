@@ -8,6 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.normalize.currency import parse_price_eur
+from scrapers.utils.fetch_retry import fetch_with_retry
 
 URL = "https://www.newbalance.fr/fr/c/homme/chaussures/"
 SOURCE = "new_balance"
@@ -32,8 +33,11 @@ def scrape() -> list[dict[str, Any]]:
             "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         )
     }
+    sess = requests.Session()
+    resp = fetch_with_retry(sess, URL, timeout=12.0, attempts=3, headers=headers)
+    if resp is None:
+        return _fallback()
     try:
-        resp = requests.get(URL, headers=headers, timeout=12)
         resp.raise_for_status()
     except requests.RequestException:
         return _fallback()

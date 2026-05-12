@@ -144,7 +144,34 @@ def _decode_response_body(url: str, r: requests.Response) -> str | None:
         return None
 
 
-def _fetch_sitemap(url: str) -> str | None:
+def _fetch_sitemap(url: str, *, deadline: float | None = None) -> str | None:
+    # When a wall deadline is active, compute a tight timeout so we don't blow past the budget.
+    # Also use a no-retry session (Retry(total=0)) to avoid 3× retry multiplication.
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 1.0:
+            return None  # no time left
+        # Cap total fetch time (connect + read) to available budget minus 0.5s margin.
+        total_budget = max(2.0, remaining - 0.5)
+        connect_t = min(CONNECT_TIMEOUT_SEC, total_budget * 0.45)
+        read_t = min(READ_TIMEOUT_SITEMAP_SEC, total_budget - connect_t)
+        # One-shot session (no retry) to honour the deadline.
+        one_shot = requests.Session()
+        one_shot.mount("https://", HTTPAdapter(max_retries=Retry(total=0)))
+        one_shot.mount("http://", HTTPAdapter(max_retries=Retry(total=0)))
+        try:
+            r = one_shot.get(
+                url,
+                headers=HEADERS,
+                timeout=(connect_t, read_t),
+                allow_redirects=True,
+            )
+            if r.status_code != 200:
+                return None
+            return _decode_response_body(url, r)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("Sitemap fetch (deadline) error %s: %s", url, e)
+            return None
     try:
         r = _session().get(
             url,
@@ -197,10 +224,13 @@ def collect_page_urls_from_sitemap(
     start_url: str,
     depth: int = 2,
     visited: set[str] | None = None,
+    *,
+    deadline: float | None = None,
 ) -> list[str]:
     """
     Déroule un index de sitemaps puis retourne les URLs de pages (http/https).
     `visited` évite les boucles entre index XML.
+    `deadline` : monotonic() deadline — abandonne le fetch si le budget est épuisé.
     """
     if visited is None:
         visited = set()
@@ -209,7 +239,10 @@ def collect_page_urls_from_sitemap(
         return []
     visited.add(norm)
 
-    raw = _fetch_sitemap(start_url)
+    if deadline is not None and time.monotonic() >= deadline - 1.0:
+        return []
+
+    raw = _fetch_sitemap(start_url, deadline=deadline)
     if not raw:
         return []
     if _is_sitemap_index(raw):
@@ -219,8 +252,10 @@ def collect_page_urls_from_sitemap(
         for loc in _extract_locs(raw)[:MAX_CHILD_SITEMAPS]:
             if not loc.startswith("http"):
                 continue
+            if deadline is not None and time.monotonic() >= deadline - 1.0:
+                break
             if loc.lower().endswith(".xml"):
-                acc.extend(collect_page_urls_from_sitemap(loc, depth - 1, visited))
+                acc.extend(collect_page_urls_from_sitemap(loc, depth - 1, visited, deadline=deadline))
             else:
                 acc.append(loc)
         return acc
@@ -239,12 +274,16 @@ def _url_relevant(url: str, brand: str, model: str) -> bool:
         bl = (brand or "").lower().replace(" ", "-")
         if bl not in u and (brand or "").lower().replace(" ", "") not in u:
             return False
-    toks = [t for t in re.split(r"\W+", (model or "").lower()) if len(t) >= 4]
+    toks = [t for t in re.split(r"\W+", (model or "").lower()) if len(t) >= 3]
     weak = {"low", "high", "women", "men", "unisex", "premium", "classic"}
     strong = [t for t in toks if t not in weak][:5]
     if not strong:
         return True
-    return any(t in u for t in strong)
+    # Require ≥2 strong tokens to match (or all when only 1 exists) to avoid
+    # single-generic-word false matches like "essential" matching a T-shirt.
+    match_count = sum(1 for t in strong if t in u)
+    required = min(2, len(strong))
+    return match_count >= required
 
 
 def _prices_from_html(html: str) -> list[float]:
@@ -278,7 +317,7 @@ def scrape_generic_sitemap(
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     try:
-        page_urls = collect_page_urls_from_sitemap(sitemap_url, depth=2)
+        page_urls = collect_page_urls_from_sitemap(sitemap_url, depth=2, deadline=wall_deadline)
     except Exception as e:  # noqa: BLE001
         logger.debug("collect_page_urls %s: %s", source_name, e)
         return results
@@ -317,6 +356,9 @@ def scrape_generic_sitemap(
 # Registre — URLs racine (index ou urlset) ; échecs réseau ignorés silencieusement.
 SITEMAP_SOURCES: list[dict[str, Any]] = [
     {"name": "courir.com", "sitemap": "https://www.courir.com/sitemap.xml", "active": True},
+    {"name": "footlocker.fr", "sitemap": "https://www.footlocker.fr/sitemap.xml", "active": True},
+    {"name": "zalando.fr", "sitemap": "https://www.zalando.fr/sitemap.xml", "active": True},
+    {"name": "snipes.com/fr", "sitemap": "https://www.snipes.com/fr/sitemap.xml", "active": True},
     {"name": "sport2000.fr", "sitemap": "https://www.sport2000.fr/sitemap.xml", "active": True},
     {"name": "intersport.fr", "sitemap": "https://www.intersport.fr/sitemap.xml", "active": True},
     {"name": "spartoo.com", "sitemap": "https://www.spartoo.com/sitemap.xml", "active": True},

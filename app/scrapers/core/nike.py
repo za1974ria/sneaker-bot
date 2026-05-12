@@ -8,6 +8,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from app.normalize.currency import parse_price_eur
+from scrapers.utils.fetch_retry import fetch_with_retry
 
 URL = "https://www.nike.com/fr/w/chaussures-y7ok"
 SOURCE = "nike.com"
@@ -22,8 +23,11 @@ def scrape() -> list[dict[str, Any]]:
             "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         )
     }
+    sess = requests.Session()
+    response = fetch_with_retry(sess, URL, timeout=12.0, attempts=3, headers=headers)
+    if response is None:
+        return []
     try:
-        response = requests.get(URL, headers=headers, timeout=12)
         response.raise_for_status()
     except requests.RequestException:
         return []

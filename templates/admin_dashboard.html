@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Admin — SneakerBot</title>
+  <style>
+    *{box-sizing:border-box}
+    body{margin:0;background:#0b0b0b;color:#e5e7eb;font-family:ui-sans-serif,system-ui,Arial,sans-serif;padding:24px}
+    .wrap{max-width:900px;margin:0 auto}
+    h1{margin:0 0 4px;font-size:1.55rem;color:#4dff9f;letter-spacing:.02em}
+    .sub{color:#6b7280;margin:0 0 28px;font-size:.92rem}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+    .card{background:#101010;border:1px solid #1f2937;border-radius:14px;padding:20px 22px;text-decoration:none;color:inherit;transition:border-color .15s,background .15s;display:block}
+    .card:hover{border-color:#4dff9f;background:#0f1a13}
+    .card-icon{font-size:1.8rem;margin-bottom:8px}
+    .card-title{font-size:1rem;font-weight:800;color:#e5e7eb;margin:0 0 4px}
+    .card-desc{font-size:.8rem;color:#6b7280;margin:0}
+    .badge-admin{display:inline-block;background:#14532d;color:#4dff9f;border:1px solid #166534;border-radius:999px;font-size:.68rem;font-weight:700;padding:2px 9px;margin-left:8px;vertical-align:middle;text-transform:uppercase;letter-spacing:.05em}
+    .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:24px}
+    .logout{color:#9ca3af;text-decoration:none;border:1px solid #2a2a2a;border-radius:8px;padding:5px 10px;font-size:.78rem;background:#111827}
+    .logout:hover{border-color:#4dff9f;color:#4dff9f}
+    .section-title{font-size:.72rem;font-weight:700;color:#4b5563;text-transform:uppercase;letter-spacing:.08em;margin:24px 0 10px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <h1>SneakerBot <span class="badge-admin">Admin</span></h1>
+      <p class="sub">Panneau d'administration — sneakerbot.shop</p>
+    </div>
+    <a href="https://sneakerbot.shop" class="logout" style="margin-right:8px">← Accueil</a>
+    <a href="/logout" class="logout">Déconnexion</a>
+  </div>
+
+  <div class="section-title">Outils principaux</div>
+  <div class="grid">
+    <a href="/comparison" class="card">
+      <div class="card-icon">🔍</div>
+      <div class="card-title">Comparateur FR</div>
+      <div class="card-desc">Comparaison multi-boutiques des prix sneakers en France</div>
+    </a>
+    <a href="/admin/subscriptions" class="card">
+      <div class="card-icon">👥</div>
+      <div class="card-title">Abonnements clients</div>
+      <div class="card-desc">Gérer, valider et rejeter les demandes d'abonnement</div>
+    </a>
+    <a href="/analytics" class="card">
+      <div class="card-icon">📊</div>
+      <div class="card-title">Analytics</div>
+      <div class="card-desc">Statistiques scraping, couverture et conversion</div>
+    </a>
+    <a href="/supervisor" class="card">
+      <div class="card-icon">🤖</div>
+      <div class="card-title">Superviseur IA (AEGIS)</div>
+      <div class="card-desc">Lancement et suivi du pipeline de vérification IA</div>
+    </a>
+  </div>
+
+  <div class="section-title">Monitoring</div>
+  <div class="grid">
+    <a href="/health" class="card">
+      <div class="card-icon">🟢</div>
+      <div class="card-title">Health Status</div>
+      <div class="card-desc">État du service, fraîcheur des données, qualité des prix</div>
+    </a>
+    <a href="/api/admin/claude-validate?brand=Nike&limit=20" class="card" target="_blank">
+      <div class="card-icon">🧠</div>
+      <div class="card-title">Validation Claude AI</div>
+      <div class="card-desc">Analyse anomalies de prix par Claude Haiku — détection boutiques suspectes</div>
+    </a>
+  </div>
+</div>
+</body>
+</html>

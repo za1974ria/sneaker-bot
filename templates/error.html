@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Erreur {{ status_code }} | Sneakerbot.shop</title>
+  <meta name="robots" content="noindex,nofollow">
+  <style>
+    :root{--bg:#0b0e0c;--card:#121814;--txt:#eef2ef;--muted:#9aa6a0;--accent:#00ff88;--border:#1e2a24}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,Arial,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;padding:18px}
+    .box{width:100%;max-width:560px;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px}
+    h1{margin:0 0 8px;font-size:1.2rem}.code{color:var(--accent);font-weight:800}.msg{color:var(--muted);line-height:1.55}
+    .cta{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}.btn{padding:9px 12px;border-radius:10px;border:1px solid var(--border);text-decoration:none;color:var(--txt)}
+    .btn-main{background:linear-gradient(135deg,#00d874,var(--accent));color:#062214;border-color:#00d874}
+  </style>
+</head>
+<body>
+  <main class="box">
+    <h1>Erreur <span class="code">{{ status_code }}</span></h1>
+    <p class="msg">{{ message }}</p>
+    <div class="cta">
+      <a class="btn btn-main" href="/comparison">Revenir au comparateur</a>
+      <a class="btn" href="/landing">Accueil</a>
+    </div>
+  </main>
+</body>
+</html>

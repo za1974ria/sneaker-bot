@@ -1,0 +1,27 @@
+/* === COLONNES MASQUÉES GLOBALEMENT === */
+th.col-score, td.col-score,
+th.col-credibilite, td.col-credibilite,
+th.col-google, td.col-google,
+th.col-position, td.col-position,
+[data-col="score"], [data-col="credibilite"],
+[data-col="google"], [data-col="position"],
+.score-col, .credibility-col, .google-col, .position-col { display: none !important; }
+
+/* === FALLBACK MASQUÉ === */
+.fallback-message, .no-data-fallback,
+.fallback-info, #fallback-msg { display: none !important; }
+
+/* === Page /comparison — col5 (Confiance/Trust) intentionally shown === */
+table#cmp-table thead th:nth-child(6),
+table#cmp-table thead th:nth-child(7),
+table#cmp-table thead th:nth-child(9),
+table#cmp-table tbody tr:not(.cmp-observation-row) td:nth-child(6),
+table#cmp-table tbody tr:not(.cmp-observation-row) td:nth-child(7),
+table#cmp-table tbody tr:not(.cmp-observation-row) td:nth-child(9) {
+  display: none !important;
+}
+
+/* Bloc scorecard commercial (texte « Score global commercial ») */
+.scorecard {
+  display: none !important;
+}

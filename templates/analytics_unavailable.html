@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analytics — indisponible</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #0b0b0b;
+      color: #f8fafc;
+      font-family: ui-sans-serif, system-ui, Arial, sans-serif;
+      padding: 1.25rem;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+    .card {
+      max-width: 1100px;
+      width: 100%;
+      border: 1px solid #27272a;
+      border-radius: 16px;
+      padding: 1.75rem 1.5rem;
+      background: linear-gradient(165deg, #111113 0%, #0a0a0c 100%);
+      box-shadow: 0 20px 40px rgba(0,0,0,.45);
+    }
+    h1 { margin: 0 0 .75rem; font-size: 1.2rem; }
+    .warn { color: #f59e0b; margin: 0 0 12px; }
+    .back { color: #00ffd5; text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+{% include 'partials/admin_topbar.html' %}
+  <div class="card">
+    <h1>📊 ANALYTICS</h1>
+    <p class="warn">Module analytics temporairement indisponible. Les autres services restent opérationnels.</p>
+    <p style="margin:0"><a class="back" href="/">← Retour</a></p>
+  </div>
+</body>
+</html>

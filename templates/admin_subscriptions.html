@@ -7,61 +7,160 @@
   <meta name="color-scheme" content="dark">
   <title>Abonnements — Admin</title>
   <style>
-    :root { --bg:#0d0d0d; --card:#121212; --border:#2a2a2a; --text:#f4f4f5; --muted:#a1a1aa; --ok:#00ff88; --bad:#f87171; }
+    :root { --bg:#0d0d0d; --card:#121212; --border:#2a2a2a; --text:#f4f4f5; --muted:#a1a1aa; --ok:#00ff88; --bad:#f87171; --purple:#7c3aed; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 20px 16px 40px; }
-    .wrap { max-width: 960px; margin: 0 auto; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 20px 16px 60px; }
+    .wrap { max-width: 1000px; margin: 0 auto; }
     h1 { font-size: 1.25rem; margin: 0 0 6px; }
-    h2 { font-size: 1rem; margin: 28px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    h2 { font-size: .88rem; margin: 28px 0 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
     .sub { color: var(--muted); font-size: .88rem; margin: 0 0 18px; }
     table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; margin-bottom: 8px; }
-    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: .86rem; vertical-align: top; }
-    th { color: var(--muted); text-transform: uppercase; font-size: .72rem; letter-spacing: .04em; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: .84rem; vertical-align: top; }
+    th { color: var(--muted); text-transform: uppercase; font-size: .7rem; letter-spacing: .04em; background: #0d0d0d; }
     tr:last-child td { border-bottom: 0; }
-    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
-    .btn { display: inline-block; padding: 8px 12px; border-radius: 8px; font-weight: 800; font-size: .78rem; text-decoration: none; border: none; cursor: pointer; }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .btn { display: inline-block; padding: 6px 11px; border-radius: 7px; font-weight: 700; font-size: .76rem; text-decoration: none; border: none; cursor: pointer; white-space: nowrap; }
     .btn-ok { background: var(--ok); color: #052818; }
     .btn-bad { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+    .btn-delete { background: transparent; color: #f87171; border: 1px solid #f87171; }
+    .btn-trial { background: var(--purple); color: #fff; }
+    .btn-warn { background: #ff8c00; color: #fff; border: none; }
+    .btn-muted { background: transparent; color: var(--muted); border: 1px solid #333; }
+    .btn-wa { background: #25D366; color: #fff; }
+    .trial-form { display: flex; align-items: center; gap: 4px; }
+    .trial-days { width: 58px; padding: 5px 6px; border-radius: 6px; background: #1a1a1a; border: 1px solid #444; color: #fff; font-size: .78rem; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:12px; font-size:.7rem; font-weight:700; }
+    .badge-trial { background:#7c3aed22; color:#a78bfa; border:1px solid #7c3aed44; }
+    .badge-validated { background:#00ff8822; color:#00ff88; border:1px solid #00ff8844; }
+    .badge-pending { background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b44; }
+    .badge-rejected { background:#f8717122; color:#f87171; border:1px solid #f8717144; }
+    .badge-suspended { background:#1a1a2e; color:#818cf8; border:1px solid #818cf844; }
     .empty { color: var(--muted); padding: 24px; text-align: center; background: var(--card); border: 1px solid var(--border); border-radius: 12px; }
     .nav { margin-bottom: 20px; }
     .nav a { color: var(--ok); font-size: .88rem; }
-    code { font-size: .8rem; background: #1a1a1a; padding: 2px 6px; border-radius: 4px; }
+    code { font-size: .78rem; background: #1a1a1a; padding: 2px 6px; border-radius: 4px; color: var(--ok); }
+
+    /* === OFFRIR ACCÈS card === */
+    .offer-card {
+      background: var(--card);
+      border: 1px solid #2a3a2a;
+      border-left: 3px solid var(--ok);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 32px;
+    }
+    .offer-card h2 { margin: 0 0 4px; color: var(--ok); font-size: 1rem; text-transform: none; letter-spacing: 0; }
+    .offer-card .desc { color: var(--muted); font-size: .84rem; margin: 0 0 20px; }
+    .form-row { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+    .form-group { display: flex; flex-direction: column; gap: 5px; }
+    .form-group label { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+    .form-input { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; color: var(--text); padding: 9px 12px; font-size: .88rem; outline: none; transition: border-color .15s; }
+    .form-input:focus { border-color: var(--ok); }
+    .form-input-wide { min-width: 220px; flex: 2; }
+    .form-input-sm { width: 100px; }
+    .form-input-msg { width: 100%; }
+    .duration-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+    .dur-btn { padding: 7px 12px; border-radius: 7px; border: 1px solid #333; background: #1a1a1a; color: var(--muted); font-size: .8rem; cursor: pointer; transition: all .15s; }
+    .dur-btn:hover { border-color: var(--ok); color: var(--ok); }
+    .dur-btn.active { background: #0f2f1f; border-color: var(--ok); color: var(--ok); font-weight: 700; }
+    .form-actions { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+    .row-suspended td { opacity: .65; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <div class="nav"><a href="/comparison">← Comparateur</a></div>
-    <h1>Demandes d’abonnement</h1>
-    <p class="sub">Réservé aux comptes administrateur. Vérifiez le virement avant validation.</p>
+    <div class="nav"><a href="/admin">← Dashboard admin</a></div>
+    <h1>Gestion des abonnements</h1>
+    <p class="sub">Réservé aux comptes administrateur.</p>
 
-    <h2>En attente</h2>
+    <!-- ═══════════════════════════════════════════════════════
+         OFFRIR ACCÈS — Création directe
+    ════════════════════════════════════════════════════════ -->
+    <div class="offer-card">
+      <h2>🎁 Offrir un accès découverte</h2>
+      <p class="desc">Créez un accès personnalisé immédiatement — email premium envoyé automatiquement.</p>
+
+      <form method="post" action="/admin/offer-access" id="offerForm">
+        <div class="form-row">
+          <div class="form-group" style="flex:2;min-width:200px">
+            <label>Prénom &amp; Nom</label>
+            <input type="text" name="name" class="form-input form-input-wide" placeholder="Aurélie Martin" required autocomplete="off">
+          </div>
+          <div class="form-group" style="flex:3;min-width:220px">
+            <label>Email client</label>
+            <input type="email" name="email" class="form-input form-input-wide" placeholder="aurelie@exemple.fr" required autocomplete="off">
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom:12px">
+          <label>Durée de l'accès</label>
+          <div class="duration-picker" id="durationPicker">
+            <button type="button" class="dur-btn" data-days="1">1 jour</button>
+            <button type="button" class="dur-btn" data-days="3">3 jours</button>
+            <button type="button" class="dur-btn active" data-days="7">7 jours</button>
+            <button type="button" class="dur-btn" data-days="14">14 jours</button>
+            <button type="button" class="dur-btn" data-days="30">30 jours</button>
+            <button type="button" class="dur-btn dur-custom" data-days="">Durée custom</button>
+          </div>
+          <input type="hidden" name="days" id="daysInput" value="7">
+          <input type="number" id="customDaysInput" class="form-input form-input-sm" placeholder="Nb jours" min="1" max="3650"
+                 style="display:none;margin-top:8px;width:120px">
+        </div>
+
+        <div class="form-group" style="margin-bottom:16px">
+          <label>Mot personnel <span style="font-weight:400;color:#555">(optionnel — inclus dans l'email)</span></label>
+          <input type="text" name="personal_message" class="form-input form-input-msg"
+                 placeholder='Ex : "Bienvenue Aurélie, ravi de vous compter parmi nos testeurs premium !"'
+                 maxlength="280" autocomplete="off">
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-ok" style="font-size:.88rem;padding:10px 20px" onclick="return confirm('Créer l\'accès et envoyer l\'email premium ?')">
+            🚀 Créer l'accès &amp; envoyer email
+          </button>
+          <span style="color:var(--muted);font-size:.78rem">Email automatique · Identifiants générés · Accès immédiat</span>
+        </div>
+      </form>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════
+         EN ATTENTE
+    ════════════════════════════════════════════════════════ -->
+    <h2>En attente ({{ pending|length }})</h2>
     {% if pending %}
     <table>
-      <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Canal</th><th>Plan</th><th>Réf.</th><th>Soumis</th><th></th></tr></thead>
+      <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Canal</th><th>Plan</th><th>Réf.</th><th>Soumis</th><th>Actions</th></tr></thead>
       <tbody>
         {% for s in pending %}
         {% set c = (s.get('canal') or 'email')|string|lower %}
         <tr>
           <td><code>{{ s.get('id', '') }}</code></td>
           <td>{{ s.get('name', '') }}</td>
-          <td>{{ s.get('email', '') }}</td>
+          <td style="font-size:.8rem;color:var(--muted)">{{ s.get('email', '') }}</td>
           <td>
-            <span style="color:#00ff88;font-size:11px">
+            <span style="color:#00ff88;font-size:.7rem">
               {% if c == 'email' %}📧{% elif c == 'whatsapp' %}📱{% else %}📧📱{% endif %}
               {{ c|upper }}
             </span>
           </td>
           <td>{{ s.get('plan', '') }}</td>
-          <td>{{ s.get('reference', '') }}</td>
-          <td>{{ s.get('submitted_at', '') }}</td>
+          <td style="font-size:.78rem">{{ s.get('reference', '') }}</td>
+          <td style="font-size:.78rem;color:var(--muted)">{{ s.get('submitted_at', '')[:16] }}</td>
           <td class="actions">
-            <a class="btn btn-ok" href="/admin/validate/{{ s.get('id', '') }}">Valider</a>
-            <a class="btn btn-bad" href="/admin/reject/{{ s.get('id', '') }}">Refuser</a>
-            <a href="{{ s.get('wa_me_url', '#') }}"
-               target="_blank" rel="noopener noreferrer"
-               style="background:#25D366;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-block">
-              📱 WhatsApp
-            </a>
+            <form method="post" action="/admin/validate/{{ s.get('id', '') }}" style="display:inline">
+              <button type="submit" class="btn btn-ok">✓ Valider</button>
+            </form>
+            <form method="post" action="/admin/trial/{{ s.get('id', '') }}" style="display:inline" class="trial-form">
+              <input type="number" name="days" value="7" min="1" max="3650" class="trial-days" title="Durée (jours)">
+              <button type="submit" class="btn btn-trial" onclick="return confirm('Accorder un essai gratuit ?')">🎁 Essai</button>
+            </form>
+            <form method="post" action="/admin/reject/{{ s.get('id', '') }}" style="display:inline">
+              <button type="submit" class="btn btn-bad" onclick="return confirm('Refuser cette demande ?')">Refuser</button>
+            </form>
+            <a href="{{ s.get('wa_me_url', '#') }}" target="_blank" rel="noopener noreferrer" class="btn btn-wa">📱 WA Admin</a>
+            <form method="post" action="/admin/delete/{{ s.get('id', '') }}" style="display:inline">
+              <button type="submit" class="btn btn-delete" style="font-size:.7rem" onclick="return confirm('Supprimer définitivement ?')">✕</button>
+            </form>
           </td>
         </tr>
         {% endfor %}
@@ -71,40 +170,83 @@
     <p class="empty">Aucune demande en attente.</p>
     {% endif %}
 
-    <h2>Validés</h2>
+    <!-- ═══════════════════════════════════════════════════════
+         VALIDÉS & ESSAIS
+    ════════════════════════════════════════════════════════ -->
+    <h2>Validés &amp; Essais ({{ validated|length }})</h2>
     {% if validated %}
     <table>
-      <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Plan</th><th>Login</th><th>Validé</th><th></th></tr></thead>
+      <thead><tr>
+        <th>ID</th><th>Nom</th><th>Email</th><th>Statut</th><th>Login</th>
+        <th>Expiration</th><th>Actions</th>
+      </tr></thead>
       <tbody>
         {% for s in validated %}
-        <tr>
-          <td><code>{{ s.get('id', '') }}</code></td>
-          <td>{{ s.get('name', '') }}</td>
-          <td>{{ s.get('email', '') }}</td>
-          <td>{{ s.get('plan', '') }}</td>
-          <td><code>{{ s.get('username', '') }}</code></td>
-          <td>{{ s.get('validated_at', '') }}</td>
+        {% set susp = s.get('is_suspended', False) %}
+        <tr {% if susp %}class="row-suspended"{% endif %}>
+          <td><code style="font-size:.72rem">{{ s.get('id', '') }}</code></td>
+          <td>
+            <strong>{{ s.get('name', '') }}</strong>
+            {% if s.get('source') == 'direct_admin' %}<span style="font-size:.65rem;color:#6b7280;margin-left:4px">direct</span>{% endif %}
+          </td>
+          <td style="font-size:.78rem;color:var(--muted)">{{ s.get('email', '') }}</td>
+          <td>
+            {% if susp %}
+            <span class="badge badge-suspended">⏸ Suspendu</span>
+            {% elif s.get('status') == 'trial' %}
+            <span class="badge badge-trial">🎁 Essai</span>
+            {% else %}
+            <span class="badge badge-validated">{{ s.get('plan', '') }}</span>
+            {% endif %}
+          </td>
+          <td><code>{{ s.get('username', '—') }}</code></td>
+          <td style="font-size:.78rem;color:{% if s.get('trial_end') %}#a78bfa{% else %}var(--muted){% endif %}">
+            {{ s.get('trial_end', '—')[:10] if s.get('trial_end') else '—' }}
+          </td>
           <td class="actions">
-            {% if s.get('show_email_sent') %}
-            <span style="background:#1a3a2a;color:#7bf1a8;padding:6px 12px;border-radius:6px;font-size:12px;display:inline-block;border:1px solid rgba(0,255,136,0.35)">📧 Email envoyé ✅</span>
+
+            {# ── Prolonger ── #}
+            <form method="post" action="/admin/extend/{{ s.get('id', '') }}" style="display:inline" class="trial-form">
+              <input type="number" name="days" value="7" min="1" max="3650" class="trial-days" title="+jours">
+              <button type="submit" class="btn btn-trial" onclick="return confirm('Prolonger l\'accès ?')">+⏱</button>
+            </form>
+
+            {# ── Suspendre / Réactiver ── #}
+            {% if susp %}
+            <form method="post" action="/admin/reactivate/{{ s.get('username', '') | urlencode }}" style="display:inline">
+              <button type="submit" class="btn btn-ok" style="font-size:.72rem" onclick="return confirm('Réactiver ce compte ?')">▶ Réactiver</button>
+            </form>
+            {% elif s.get('username') %}
+            <form method="post" action="/admin/suspend/{{ s.get('username', '') | urlencode }}" style="display:inline">
+              <button type="submit" class="btn btn-muted" style="font-size:.72rem" onclick="return confirm('Suspendre ce compte ?')">⏸ Suspendre</button>
+            </form>
             {% endif %}
+
+            {# ── Email ── #}
+            {% if s.get('email') %}
+            <form method="post" action="/admin/resend-email/{{ s.get('id', '') }}" style="display:inline">
+              <button type="submit" class="btn btn-muted" style="font-size:.72rem" onclick="return confirm('Renvoyer l\'email premium ?')">📧 Email</button>
+            </form>
+            {% endif %}
+
+            {# ── WhatsApp accès client ── #}
             {% if s.get('wa_client_url') %}
-            <a href="{{ s.get('wa_client_url') }}"
-               target="_blank" rel="noopener noreferrer"
-               style="background:#25D366;color:#fff;padding:6px 12px;border-radius:6px;text-decoration:none;font-size:12px;display:inline-block">
-              📱 Accès WhatsApp client
-            </a>
+            <a href="{{ s.get('wa_client_url') }}" target="_blank" rel="noopener noreferrer" class="btn btn-wa" style="font-size:.72rem" title="Message WA pré-rempli avec identifiants">📱 WA Accès</a>
+            {% elif s.get('wa_login_url') %}
+            <a href="{{ s.get('wa_login_url') }}" target="_blank" rel="noopener noreferrer" class="btn btn-wa" style="font-size:.72rem">📱 WA Login</a>
             {% endif %}
-            {% if not s.get('show_email_sent') and not s.get('wa_client_url') %}
-            <span style="color:var(--muted);font-size:12px">—</span>
-            {% endif %}
+
+            {# ── Reset credentials ── #}
             {% if s.get('username') %}
-            <a href="/admin/reset/{{ s.get('username') | urlencode }}"
-               style="background:#ff8c00;color:#fff;padding:4px 10px;border-radius:4px;text-decoration:none;font-size:11px;margin-left:4px;display:inline-block"
-               onclick="return confirm('Réinitialiser les accès ?');">
-              🔄 Reset
-            </a>
+            <form method="post" action="/admin/reset/{{ s.get('username') | urlencode }}" style="display:inline">
+              <button type="submit" class="btn btn-warn" style="font-size:.7rem" onclick="return confirm('Réinitialiser les identifiants ?')">🔄 Reset</button>
+            </form>
             {% endif %}
+
+            {# ── Supprimer ── #}
+            <form method="post" action="/admin/delete/{{ s.get('id', '') }}" style="display:inline">
+              <button type="submit" class="btn btn-delete" style="font-size:.7rem;padding:4px 8px" onclick="return confirm('Supprimer définitivement ?')">✕</button>
+            </form>
           </td>
         </tr>
         {% endfor %}
@@ -114,18 +256,26 @@
     <p class="empty">Aucun abonnement validé.</p>
     {% endif %}
 
-    <h2>Refusés</h2>
+    <!-- ═══════════════════════════════════════════════════════
+         REFUSÉS
+    ════════════════════════════════════════════════════════ -->
+    <h2>Refusés ({{ rejected|length }})</h2>
     {% if rejected %}
     <table>
-      <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Plan</th><th>Refusé</th></tr></thead>
+      <thead><tr><th>ID</th><th>Nom</th><th>Email</th><th>Plan</th><th>Refusé</th><th></th></tr></thead>
       <tbody>
         {% for s in rejected %}
         <tr>
-          <td><code>{{ s.get('id', '') }}</code></td>
+          <td><code style="font-size:.72rem">{{ s.get('id', '') }}</code></td>
           <td>{{ s.get('name', '') }}</td>
-          <td>{{ s.get('email', '') }}</td>
+          <td style="font-size:.78rem;color:var(--muted)">{{ s.get('email', '') }}</td>
           <td>{{ s.get('plan', '') }}</td>
-          <td>{{ s.get('rejected_at', '') }}</td>
+          <td style="font-size:.78rem;color:var(--muted)">{{ s.get('rejected_at', '')[:16] }}</td>
+          <td>
+            <form method="post" action="/admin/delete/{{ s.get('id', '') }}" style="display:inline">
+              <button type="submit" class="btn btn-delete" style="font-size:.7rem;padding:4px 8px" onclick="return confirm('Supprimer ?')">✕</button>
+            </form>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -133,6 +283,45 @@
     {% else %}
     <p class="empty">Aucun refus.</p>
     {% endif %}
+
+    <p style="color:#374151;font-size:.75rem;margin-top:32px;text-align:center">
+      SneakerBot Admin — Prix actualisés 2×/jour (08h &amp; 20h)
+    </p>
   </div>
+
+  <script>
+  // Duration picker logic
+  (function() {
+    const picker = document.getElementById('durationPicker');
+    const daysInput = document.getElementById('daysInput');
+    const customInput = document.getElementById('customDaysInput');
+    if (!picker || !daysInput) return;
+
+    picker.querySelectorAll('.dur-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        picker.querySelectorAll('.dur-btn').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        if (btn.classList.contains('dur-custom')) {
+          customInput.style.display = 'block';
+          customInput.focus();
+          daysInput.value = customInput.value || '';
+        } else {
+          customInput.style.display = 'none';
+          daysInput.value = btn.getAttribute('data-days') || '7';
+        }
+      });
+    });
+
+    customInput.addEventListener('input', function() {
+      daysInput.value = customInput.value;
+    });
+
+    // Validate before submit
+    document.getElementById('offerForm').addEventListener('submit', function(e) {
+      var d = parseInt(daysInput.value, 10);
+      if (!d || d < 1) { e.preventDefault(); alert('Veuillez sélectionner une durée.'); }
+    });
+  })();
+  </script>
 </body>
 </html>

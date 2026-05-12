@@ -1,0 +1,855 @@
+/* Généré depuis app.py — logique page /comparison */
+(function () {
+    const catalog = window.__CMP__.catalog;
+    const brandSelect = document.getElementById('brandSelect');
+    const modelSelect = document.getElementById('modelSelect');
+    if (brandSelect && modelSelect) {
+      brandSelect.addEventListener('change', () => {
+        const models = catalog[brandSelect.value] || [];
+        modelSelect.innerHTML = '';
+        models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m; opt.textContent = m;
+          modelSelect.appendChild(opt);
+        });
+        // Mettre à jour l'image dès que la marque change
+        if (typeof window.displayProduct === 'function' && modelSelect.value) {
+          window.displayProduct(modelSelect.value, brandSelect.value || null);
+        }
+      });
+    }
+    const qs = new URLSearchParams({
+      brand:(brandSelect && brandSelect.value) || window.__CMP__.selectedBrand,
+      model:(modelSelect && modelSelect.value) || window.__CMP__.selectedModel,
+      validated_only:'true'
+    });
+    const rows = document.getElementById('rows');
+    const jobStatus = document.getElementById('jobStatus');
+    const clockHealth = document.getElementById('clockHealth');
+    const scoreTotal = document.getElementById('scoreTotal');
+    const scoreGrade = document.getElementById('scoreGrade');
+    const scoreMeta = document.getElementById('scoreMeta');
+    const copySyncLinkBtn = document.getElementById('copySyncLink');
+    const shareWhatsAppBtn = document.getElementById('shareWhatsApp');
+    let refreshModeActive = false;
+    let lastRenderedItems = null;
+    let retryStatusTimer = null;
+    let lastHealthSnapshot = null;
+
+    function setRefreshMode(active) {
+      const on = !!active;
+      if (on === refreshModeActive) return;
+      refreshModeActive = on;
+      if (on) console.info('[UI] refresh mode active');
+    }
+    function renderJobStatus(s) {
+      if (!jobStatus) return;
+      const running = !!(s && s.running);
+      setRefreshMode(running);
+      jobStatus.className = 'upd-badge ' + (running ? 'job-run' : 'job-idle');
+      if (running) {
+        jobStatus.textContent = '🟢 Synchronisation en cours...';
+        if (clockHealth) {
+          const warn = (((s && s.data_freshness) || {}).warnings || []);
+          const hasStale = Array.isArray(warn) && warn.length > 0;
+          clockHealth.className = 'upd-badge ' + (hasStale ? 'clock-warning' : 'clock-ok');
+          clockHealth.textContent = hasStale ? '🟠 Mise à jour des données en cours' : '🟢 Synchronisation en cours...';
+        }
+      } else {
+        const endAt = (s && s.last_end_at) ? String(s.last_end_at).slice(11,16) : '';
+        jobStatus.textContent = endAt ? `dernier run ${endAt}` : 'idle';
+      }
+    }
+    let jobStatusTimer = null;
+    function refreshJobStatus() {
+      fetchWithTimeout('/api/update/fr/status', 4000)
+        .then(r => {
+          if (r.status === 401) {
+            if (jobStatusTimer) {
+              clearInterval(jobStatusTimer);
+              jobStatusTimer = null;
+            }
+            if (jobStatus) {
+              jobStatus.className = 'upd-badge job-idle';
+              jobStatus.textContent = 'session expiree';
+            }
+            return null;
+          }
+          return r.json();
+        })
+        .then(data => {
+          if (data) renderJobStatus(data);
+        })
+        .catch(() => {
+          if (refreshModeActive && jobStatus) {
+            jobStatus.className = 'upd-badge job-run';
+            jobStatus.textContent = '🟢 Synchronisation en cours...';
+          }
+          if (retryStatusTimer) clearTimeout(retryStatusTimer);
+          console.info('[UI] retrying status');
+          retryStatusTimer = setTimeout(refreshJobStatus, 5000);
+        });
+    }
+    refreshJobStatus();
+    jobStatusTimer = setInterval(refreshJobStatus, 15000);
+
+    function gradeClass(grade) {
+      if (grade === 'Premium') return 'score-grade g-premium';
+      if (grade === 'Fiable') return 'score-grade g-fiable';
+      if (grade === 'A surveiller') return 'score-grade g-watch';
+      return 'score-grade g-risk';
+    }
+    function clampMinutes(mins) {
+      return Math.min(Math.max(0, Number(mins) || 0), 999);
+    }
+    function parseDateLoose(raw) {
+      const txt = String(raw || '').trim();
+      if (!txt) return null;
+      const d = new Date(txt.replace(' ', 'T'));
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    function formatSyncAge(rawDate) {
+      const dt = parseDateLoose(rawDate);
+      if (!dt) return 'Synchro en attente';
+      const mins = clampMinutes((Date.now() - dt.getTime()) / 60000);
+      if (mins > 180) return 'Synchro en attente';
+      if (mins > 120) return 'Synchro en cours';
+      return `il y a ${Math.round(mins)} min`;
+    }
+    function setLiveDataBadge(isFresh) {
+      const badge = document.getElementById('liveDataBadge');
+      if (!badge) return;
+      badge.className = 'upd-badge ' + (isFresh ? 'live-good' : 'live-warn');
+      badge.textContent = isFresh
+        ? '🟢 LIVE DATA — Marché analysé en temps réel'
+        : '🟠 Données en cours de synchronisation';
+    }
+    function showSkeletonRows() {
+      if (!rows) return;
+      rows.innerHTML = Array.from({ length: 4 }).map(function() {
+        return '<tr class="cmp-skeleton"><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td><td><span class="sb-skeleton-line"></span></td></tr>';
+      }).join('');
+    }
+    function refreshHealthSignals() {
+      fetchWithTimeout('/health', 4000)
+        .then(function(r) { return r.json(); })
+        .then(function(h) {
+          lastHealthSnapshot = h || {};
+          const fresh = ((h || {}).data_freshness || {});
+          const fr = fresh.market_fr_csv || {};
+          const src = fresh.market_fr_sources_csv || {};
+          const stale = !!(fr.stale || src.stale);
+          setLiveDataBadge(!stale);
+          const lastSync = document.getElementById('lastSyncHuman');
+          if (lastSync) {
+            const label = String((h || {}).last_sync_human || '').trim() || formatSyncAge((((h || {}).serpapi_sync || {}).last_run || ((h || {}).last_refresh || {}).updated_at));
+            lastSync.textContent = label;
+          }
+          const totalShops = document.getElementById('total-boutiques');
+          if (totalShops) {
+            const n = Number(src.distinct_shops || 0);
+            if (n > 0) totalShops.textContent = String(n);
+          }
+        })
+        .catch(function() {
+          setLiveDataBadge(false);
+        });
+    }
+    function currentStateParams() {
+      const p = new URLSearchParams(window.location.search);
+      p.set('brand', (brandSelect && brandSelect.value) || window.__CMP__.selectedBrand);
+      p.set('model', (modelSelect && modelSelect.value) || window.__CMP__.selectedModel);
+      p.delete('include_excluded');
+      p.delete('pqs');
+      p.delete('perf');
+      return p;
+    }
+    function syncUrlState() {
+      const p = currentStateParams();
+      window.history.replaceState(null, '', `${window.location.pathname}?${p.toString()}`);
+    }
+
+    function refreshCommercialScore() {
+      const brand = (brandSelect && brandSelect.value) || window.__CMP__.selectedBrand;
+      const model = (modelSelect && modelSelect.value) || window.__CMP__.selectedModel;
+      const s = new URLSearchParams({
+        brand,
+        model,
+        product_quality_score: '80',
+        performance_score: '78',
+      });
+      fetchWithTimeout('/api/scorecard/fr?' + s.toString(), 4000)
+        .then(r => r.json())
+        .then(d => {
+          const total = Number(d.total_score || 0).toFixed(2);
+          const grade = String(d.grade || 'Risque eleve');
+          const n = Number(d.items_count || 0);
+          if (scoreTotal) scoreTotal.textContent = `Score global commercial: ${total}/100`;
+          if (scoreGrade) {
+            scoreGrade.className = gradeClass(grade);
+            scoreGrade.textContent = grade;
+          }
+          if (scoreMeta) scoreMeta.textContent = n > 0 ? `${n} ligne(s) validée(s) utilisées` : 'Aucune ligne valide';
+        })
+        .catch(() => {
+          if (refreshModeActive) {
+            console.info('[UI] cached data preserved');
+            return;
+          }
+          if (scoreTotal) scoreTotal.textContent = 'Score global commercial: indisponible';
+          if (scoreGrade) {
+            scoreGrade.className = 'score-grade g-risk';
+            scoreGrade.textContent = 'N/A';
+          }
+          if (scoreMeta) scoreMeta.textContent = 'Erreur de calcul scorecard';
+        });
+    }
+    refreshCommercialScore();
+    if (brandSelect) brandSelect.addEventListener('change', refreshCommercialScore);
+    if (modelSelect) modelSelect.addEventListener('change', refreshCommercialScore);
+    if (brandSelect) brandSelect.addEventListener('change', syncUrlState);
+    if (modelSelect) modelSelect.addEventListener('change', syncUrlState);
+    if (copySyncLinkBtn) {
+      copySyncLinkBtn.addEventListener('click', async () => {
+        try {
+          syncUrlState();
+          await navigator.clipboard.writeText(window.location.href);
+          copySyncLinkBtn.textContent = 'Lien copié';
+          setTimeout(() => { copySyncLinkBtn.textContent = 'Copier lien mobile'; }, 1400);
+        } catch {
+          copySyncLinkBtn.textContent = 'Copie impossible';
+          setTimeout(() => { copySyncLinkBtn.textContent = 'Copier lien mobile'; }, 1400);
+        }
+      });
+    }
+    if (shareWhatsAppBtn) {
+      shareWhatsAppBtn.addEventListener('click', () => {
+        try {
+          syncUrlState();
+          const shareUrl = window.location.href;
+          // Lien texte uniquement (pas d'image envoyée par le bouton).
+          const txt = encodeURIComponent(shareUrl);
+          const waUrl = `https://wa.me/?text=${txt}`;
+          window.open(waUrl, '_blank');
+        } catch {
+          // no-op
+        }
+      });
+    }
+    // Propager pqs/perf dans l'URL à chaque soumission du formulaire.
+    const form = document.querySelector('form.f');
+    if (form) {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const p = currentStateParams();
+        window.location.search = p.toString();
+      });
+    }
+
+    function escAttr(s) {
+      return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+    }
+    function recBadgeClass(r) {
+      const m = {
+        '⭐ MEILLEUR PRIX': 'badge-rec rec-gold',
+        '💰 PRIX LE PLUS BAS': 'badge-rec rec-gm',
+        '✅ PRIX MARCHÉ': 'badge-rec rec-mkt',
+        '⚠️ PRIX ÉLEVÉ': 'badge-rec rec-high',
+        '👍 BON PRIX': 'badge-rec rec-ok'
+      };
+      return m[r] || 'badge-rec rec-ok';
+    }
+    function posBadgeClass(p) {
+      const m = {
+        'Top 10%': 'badge-pos pos-t10',
+        'Top 25%': 'badge-pos pos-t25',
+        'Milieu de gamme': 'badge-pos pos-mid',
+        'Haut de gamme': 'badge-pos pos-hi'
+      };
+      return m[p] || 'badge-pos pos-mid';
+    }
+    function sneakerModelId(brand, model) {
+      return String(brand || '').trim() + '|' + String(model || '').trim();
+    }
+    function cmpCloseHistory() {
+      const ho = document.getElementById('modal-history-overlay');
+      if (ho) ho.style.display = 'none';
+    }
+    window.__cmpCloseHistory = cmpCloseHistory;
+    function cmpRenderHistory(hist, trend) {
+      hist = hist || {};
+      trend = trend || {};
+      const points = hist.history || [];
+      const trendIcons = { hausse: '📈', baisse: '📉', stable: '➡️' };
+      const trendColors = { hausse: '#ff6b6b', baisse: '#00ff88', stable: '#ffd700' };
+      const trKey = trend.trend;
+      const icon = trendIcons[trKey] || '—';
+      const color = trendColors[trKey] || '#aaa';
+      const chg = trend.change_pct != null ? Number(trend.change_pct) : 0;
+      let svgChart = '<p style="color:#666;font-size:13px">Pas assez de données pour le graphique (min. 2 snapshots)</p>';
+      if (points.length >= 2) {
+        const prices = points.map(p => Number(p.price_avg));
+        const minP = Math.min(...prices);
+        const maxP = Math.max(...prices);
+        const range = (maxP - minP) || 1;
+        const W = 520, H = 80;
+        const pts = prices.map((p, i) => {
+          const x = (i / (prices.length - 1)) * W;
+          const y = H - ((p - minP) / range) * (H - 10) - 5;
+          return x.toFixed(1) + ',' + y.toFixed(1);
+        }).join(' ');
+        const dates = points.map(p => (p.recorded_at && String(p.recorded_at).substring(0, 10)) || '');
+        let circles = '';
+        for (let i = 0; i < points.length; i++) {
+          const x = (i / (prices.length - 1)) * W;
+          const y = H - ((prices[i] - minP) / range) * (H - 10) - 5;
+          const dshort = dates[i] ? dates[i].substring(5) : '';
+          circles += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="3" fill="#00ff88"/>';
+          circles += '<text x="' + x.toFixed(1) + '" y="' + (H + 15) + '" font-size="9" fill="#666" text-anchor="middle">' + escAttr(dshort) + '</text>';
+        }
+        svgChart = '<svg width="100%" viewBox="0 0 ' + W + ' ' + (H + 20) + '" style="margin:12px 0;overflow:visible">' +
+          '<polyline points="' + pts + '" fill="none" stroke="#00ff88" stroke-width="2"/>' + circles + '</svg>';
+      }
+      const hb = document.getElementById('history-modal-body');
+      if (!hb) return;
+      const tlab = trKey != null ? String(trKey) : '—';
+      hb.innerHTML = '<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:16px">' +
+        '<span>Tendance : <strong style="color:' + color + '">' + icon + ' ' + escAttr(tlab) + '</strong></span>' +
+        '<span>Variation : <strong style="color:' + color + '">' + (chg >= 0 ? '+' : '') + chg + '%</strong></span>' +
+        '<span>Min 30j : <strong style="color:#00ff88">' + escAttr(String(trend.min_30d != null ? trend.min_30d : '—')) + '\u00a0€</strong></span>' +
+        '<span>Max 30j : <strong style="color:#00ff88">' + escAttr(String(trend.max_30d != null ? trend.max_30d : '—')) + '\u00a0€</strong></span>' +
+        '<span>Snapshots : <strong>' + escAttr(String(trend.nb_snapshots != null ? trend.nb_snapshots : 0)) + '</strong></span>' +
+        '</div>' + svgChart +
+        (points.length === 0 ? '<p style="color:#666;font-size:13px">Aucun historique pour l’instant.</p>' : '');
+    }
+    function cmpOpenHistory(modelId) {
+      const ho = document.getElementById('modal-history-overlay');
+      if (!ho || !modelId) return;
+      ho.style.display = 'flex';
+      const ht = document.getElementById('history-modal-title');
+      if (ht) ht.textContent = String(modelId).split('|').join(' ');
+      const hb = document.getElementById('history-modal-body');
+      if (hb) hb.innerHTML = '<p style="color:#666">Chargement...</p>';
+      const enc = encodeURIComponent(modelId);
+      Promise.all([
+        fetch('/api/sneakers/' + enc + '/history?days=30', { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('h'); return r.json(); }),
+        fetch('/api/sneakers/' + enc + '/trend', { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('t'); return r.json(); })
+      ]).then((pair) => cmpRenderHistory(pair[0], pair[1]))
+        .catch(() => { if (hb) hb.innerHTML = '<p style="color:#ff4444">Historique non disponible</p>'; });
+    }
+
+    const WA_NUMBER = window.__CMP__.waNumber;
+    const IS_ADMIN = !!window.__CMP__.isAdmin;
+
+    // ── KPI Bar : models count from catalog ──────────────────────────────────
+    (function initKpiBar() {
+      const totalModels = Object.values(catalog || {}).reduce(function(s, a) { return s + (Array.isArray(a) ? a.length : 0); }, 0);
+      const kpiModels = document.getElementById('kpi-models');
+      if (kpiModels && totalModels > 0) kpiModels.textContent = totalModels;
+    })();
+
+    // ── Market Health : computed from items after fetch ──────────────────────
+    function updateMarketHealth(items) {
+      const arr = Array.isArray(items) ? items.filter(Boolean) : [];
+      if (!arr.length) return; // HTML defaults (Stable / Moyenne / 87/100) remain visible
+
+      // ── Trend ──
+      const states = arr.map(function(it) { return String(it.market_state || 'stable'); });
+      const unstable = states.filter(function(s) { return s === 'unstable'; }).length;
+      const variable = states.filter(function(s) { return s === 'variable'; }).length;
+      let trend = 'Stable', trendColor = '#4dff9f';
+      if (unstable > arr.length * 0.25) { trend = 'Volatile'; trendColor = '#f87171'; }
+      else if (variable > arr.length * 0.40) { trend = 'Variable'; trendColor = '#ffd700'; }
+
+      // ── Liquidité ──
+      const avgSrc = arr.reduce(function(s, it) { return s + Number(it.source_count || 0); }, 0) / arr.length;
+      const liq = avgSrc >= 15 ? 'Élevée' : avgSrc >= 6 ? 'Moyenne' : 'Faible';
+      const liqColor = liq === 'Élevée' ? '#4dff9f' : liq === 'Moyenne' ? '#ffd700' : '#f87171';
+
+      // ── Score confiance ──
+      const scores = arr.map(function(it) { return Number(it.score || 0); }).filter(function(s) { return s > 0; });
+      const avgScore = scores.length ? Math.round(scores.reduce(function(a, b) { return a + b; }, 0) / scores.length) : 0;
+      const confText = avgScore > 0 ? avgScore + '/100' : null; // null = keep HTML fallback "87/100"
+
+      // ── Update mkt-health bar ──
+      const el = function(id) { return document.getElementById(id); };
+      const mktTrend = el('mkt-trend');
+      const mktLiq = el('mkt-liq');
+      const mktConf = el('mkt-conf');
+      if (mktTrend) { mktTrend.textContent = trend; mktTrend.style.color = trendColor; }
+      if (mktLiq) { mktLiq.textContent = liq; mktLiq.style.color = liqColor; }
+      if (mktConf && confText) {
+        mktConf.textContent = confText;
+        mktConf.classList.remove('trust-high', 'trust-mid', 'trust-low');
+        if (avgScore >= 90) mktConf.classList.add('trust-high');
+        else if (avgScore >= 75) mktConf.classList.add('trust-mid');
+        else mktConf.classList.add('trust-low');
+      }
+      const modelSources = document.getElementById('model-sources');
+      if (modelSources) {
+        const total = arr.reduce(function(s, it) { return s + Number(it.source_count || 0); }, 0);
+        modelSources.textContent = String(total);
+      }
+      // P6 : mise à jour mention source count + badge fraîcheur
+      const srcMention = document.getElementById('sourceCountMention');
+      if (srcMention) {
+        const totalSrc = arr.reduce(function(s, it) { return s + Number(it.source_count || 0); }, 0);
+        srcMention.textContent = totalSrc > 0 ? String(totalSrc) : '\u2014';
+      }
+      const freshBadge = document.getElementById('freshnessBadge');
+      if (freshBadge && arr.length > 0) {
+        const hasFreshData = arr.some(it => {
+          const upd = String(it.updated_at || '');
+          if (!upd) return false;
+          try { return (Date.now() - new Date(upd).getTime()) < 4 * 3600 * 1000; } catch(e) { return false; }
+        });
+        if (hasFreshData) {
+          freshBadge.textContent = '\uD83D\uDFE2 Donn\u00e9es fra\u00eeches';
+          freshBadge.style.background = '#071a0c';
+          freshBadge.style.color = '#4dff9f';
+        }
+      }
+      const modelLastCheck = document.getElementById('model-last-check');
+      if (modelLastCheck) {
+        const sync = (lastHealthSnapshot || {}).serpapi_sync || {};
+        const refresh = (lastHealthSnapshot || {}).last_refresh || {};
+        modelLastCheck.textContent = formatSyncAge(sync.last_run || refresh.updated_at || refresh.last_end_at);
+      }
+
+      // ── Insight cards : Résumé marché ──
+      const avgs = arr.map(function(it) { return Number(it.price_avg || 0); }).filter(function(v) { return v > 0; });
+      const globalAvg = avgs.length ? avgs.reduce(function(a, b) { return a + b; }, 0) / avgs.length : 0;
+      const spreads = arr.map(function(it) {
+        const mn = Number(it.price_min || 0), mx = Number(it.price_max || 0), av = Number(it.price_avg || 0);
+        return av > 0 ? (mx - mn) / av * 100 : 0;
+      }).filter(function(s) { return s > 0; });
+      const avgSpread = spreads.length ? Math.round(spreads.reduce(function(a, b) { return a + b; }, 0) / spreads.length) : 0;
+
+      const insAvg = el('ins-avg');
+      const insSpread = el('ins-spread');
+      const insConf = el('ins-conf');
+      if (insAvg && globalAvg > 0) insAvg.textContent = globalAvg.toFixed(0) + '\u00a0\u20ac';
+      if (insSpread && avgSpread > 0) insSpread.textContent = '\u00b1' + avgSpread + '%';
+      if (insConf) insConf.textContent = confText || '87/100';
+
+      // ── Insight cards : Opportunité détectée ──
+      const recs = arr.map(function(it) { return String(it.recommandation || ''); });
+      const goodCount = recs.filter(function(r) {
+        return r.indexOf('MEILLEUR') !== -1 || r.indexOf('BON PRIX') !== -1 || r.indexOf('PLUS BAS') !== -1;
+      }).length;
+      const highCount = recs.filter(function(r) { return r.indexOf('\u00c9LEV\u00c9') !== -1; }).length;
+      const insOpp = el('ins-opp');
+      if (insOpp) {
+        if (goodCount / arr.length >= 0.5) {
+          insOpp.innerHTML = '<span style="color:#4dff9f">\u2705 Bon prix d\u00e9tect\u00e9</span>';
+        } else if (arr.length > 0 && highCount / arr.length > 0.4) {
+          insOpp.innerHTML = '<span style="color:#f87171">\u26a0\ufe0f Vigilance prix \u00e9lev\u00e9s</span>';
+        } else {
+          insOpp.innerHTML = '<span style="color:#ffd700">\u2696\ufe0f March\u00e9 \u00e9quilibr\u00e9</span>';
+        }
+      }
+    }
+
+    // Inject fade animation for low-price analysis module (once)
+    if (!document.getElementById('sb-low-css')) {
+      const _s = document.createElement('style');
+      _s.id = 'sb-low-css';
+      _s.textContent = '@keyframes sbFadeUp{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}';
+      document.head.appendChild(_s);
+    }
+    // ── P5 : Popup transparence sources ──────────────────────────────────────
+    // Boutiques exclues : marketplaces non vérifiées, sources junk
+    const _JUNK_SHOP_PATTERNS = ['ebay', 'vinted', 'leboncoin', 'occasion', 'used',
+      'marketplace', 'aliexpress', 'wish', 'temu', 'shein', 'unknown', 'divers',
+      'agrege', 'agrege fr', 'manual fr', 'source aggreg', 'generic'];
+    function _isCredibleShop(shop) {
+      if (!shop) return false;
+      const sl = shop.toLowerCase();
+      return !_JUNK_SHOP_PATTERNS.some(p => sl.indexOf(p) !== -1);
+    }
+    function _shopTrustBadge(shop, price) {
+      // Boutiques premium connues
+      const premiumShops = ['courir', 'foot locker', 'footlocker', 'jd sports', 'snipes',
+        'zalando', 'nike', 'adidas', 'new balance', 'asics', 'puma', 'reebok', 'vans',
+        'converse', 'intersport', 'sport 2000', 'sprinter', 'basket4ballers', 'size?',
+        'offspring', 'end clothing', 'asos', 'zara', 'fnac', 'decathlon'];
+      const sl = (shop || '').toLowerCase();
+      if (premiumShops.some(p => sl.indexOf(p) !== -1))
+        return '<span style="font-size:.6rem;padding:1px 5px;border-radius:4px;background:#00ff8822;color:#00ff88;border:1px solid #00ff8844;margin-left:4px">Premium</span>';
+      return '<span style="font-size:.6rem;padding:1px 5px;border-radius:4px;background:#6366f122;color:#818cf8;border:1px solid #6366f144;margin-left:4px">Revendeur</span>';
+    }
+    function showSourcesPopup(it) {
+      // Collecte des sources vérifiées : SerpAPI premium_rows uniquement
+      const rawSources = Array.isArray(it.premium_sources) ? it.premium_sources : [];
+      const sources = rawSources.filter(s => _isCredibleShop(s.shop) && Number(s.price) > 0);
+      const brand = it.brand || '';
+      const model = it.model || '';
+      // Popup overlay
+      let overlay = document.getElementById('sb-sources-overlay');
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'sb-sources-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+        document.body.appendChild(overlay);
+      }
+      const srcCount = Number(it.source_count || 0);
+      const confScore = Number(it.confidence_score || it.score || 0);
+      const confLabel = it.confidence_label || '';
+      const freshnessBadge = it.source_premium_used
+        ? '<span style="font-size:.65rem;padding:2px 8px;border-radius:999px;background:#fbbf2422;color:#fbbf24;border:1px solid #fbbf2444">⭐ Source premium validée</span>'
+        : '';
+      let sourceRows = '';
+      if (sources.length === 0) {
+        sourceRows = '<p style="color:#6b7280;font-size:.85rem;padding:12px 0">Détail boutiques non disponible pour ce modèle.<br>Les données agrégées restent fiables.</p>';
+      } else {
+        // Tri par prix croissant
+        const sorted = sources.slice().sort((a, b) => Number(a.price) - Number(b.price));
+        sourceRows = sorted.map(s => {
+          const priceStr = Number(s.price).toFixed(2).replace('.', ',') + '\u00a0\u20ac';
+          const trustBadge = _shopTrustBadge(s.shop, s.price);
+          const linkHtml = s.link
+            ? `<a href="${s.link}" target="_blank" rel="noopener noreferrer" style="color:#6366f1;font-size:.7rem;margin-left:8px">Voir \u2197</a>`
+            : '';
+          return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #1e1e1e;gap:8px;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:4px;min-width:0;flex:1">
+              <span style="font-size:.82rem;color:#e2e8f0;font-weight:600;word-break:break-word">${s.shop}</span>
+              ${trustBadge}${linkHtml}
+            </div>
+            <span style="font-size:.9rem;font-weight:800;color:#00ff88;white-space:nowrap">${priceStr}</span>
+          </div>`;
+        }).join('');
+      }
+      overlay.innerHTML = `<div style="background:#111;border:1px solid #2a2a2a;border-radius:16px;max-width:480px;width:100%;padding:24px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.8)">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+          <div>
+            <h3 style="margin:0 0 4px;font-size:1rem;color:#f4f4f5">${brand} ${model}</h3>
+            <p style="margin:0;font-size:.78rem;color:#6b7280">Sources de prix v\u00e9rifi\u00e9es</p>
+          </div>
+          <button onclick="document.getElementById('sb-sources-overlay').remove()" style="background:transparent;border:1px solid #333;color:#aaa;border-radius:8px;padding:4px 10px;cursor:pointer;font-size:.8rem">\u2715 Fermer</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+          <span style="font-size:.7rem;padding:3px 10px;border-radius:999px;background:#1a1a1a;color:#a1a1aa;border:1px solid #2a2a2a">${srcCount} sources analys\u00e9es</span>
+          <span style="font-size:.7rem;padding:3px 10px;border-radius:999px;background:#1a1a1a;color:#a1a1aa;border:1px solid #2a2a2a">Score ${confScore}/100 ${confLabel}</span>
+          ${freshnessBadge}
+        </div>
+        <div style="font-size:.72rem;color:#6b7280;margin-bottom:12px;padding:8px;background:#0d0d0d;border-radius:8px;line-height:1.5">
+          \uD83D\uDD12 Estimation march\u00e9 bas\u00e9e sur ${srcCount} source${srcCount > 1 ? 's' : ''} actives. Prix indicatifs — toujours v\u00e9rifier en boutique.
+        </div>
+        <div>${sourceRows}</div>
+        <p style="margin:16px 0 0;font-size:.68rem;color:#4b5563;text-align:center">Prix actualis\u00e9s 2 fois par jour \u2014 sneakerbot.shop</p>
+      </div>`;
+    }
+
+    function renderSourcesBadge(it) {
+      const sc = Number(it.source_count || 0);
+      const conf = String(it.price_confidence || 'none');
+      const hasPremium = Array.isArray(it.premium_sources) && it.premium_sources.filter(s => _isCredibleShop(s.shop) && Number(s.price) > 0).length > 0;
+      const cls = 'src-badge sb-' + conf;
+      const label = sc === 0 ? '\u2014 sources' : (sc === 1 ? '1 source' : sc + ' sources');
+      // Badge cliquable si sources premium disponibles
+      if (hasPremium) {
+        return `<span class="${cls} sb-sources-clickable" data-count="${sc}" title="Cliquer pour voir le d\u00e9tail des sources" style="cursor:pointer" onclick="(function(el){var rows=el.closest('tr');var mid=rows?rows.querySelector('[data-mid]'):null;})( this)">${label} \uD83D\uDD0D</span>`;
+      }
+      return `<span class="${cls}" data-count="${sc}" title="${label}">${label}</span>`;
+    }
+    function getSafePriceTriplet(item) {
+      const safeMin = Number.isFinite(item && item.price_min) ? item.price_min : 0;
+      const safeAvg = Number.isFinite(item && item.price_avg) ? item.price_avg : safeMin;
+      const safeMax = Number.isFinite(item && item.price_max) ? item.price_max : safeAvg;
+      return { safeMin, safeAvg, safeMax };
+    }
+    // ── V2 confidence badge helpers ───────────────────────────────────────────
+    function v2ConfBadge(conf) {
+      if (!conf) return '';
+      const map = {
+        strong: { bg: '#0f2f1f', color: '#4dff9f', label: 'v2 ✓ strong' },
+        medium: { bg: '#2e260d', color: '#ffd66f', label: 'v2 ~ medium' },
+        low:    { bg: '#3b1111', color: '#fda4af', label: 'v2 low' },
+      };
+      const s = map[conf] || map.low;
+      return `<span style="display:inline-block;margin-left:5px;padding:2px 7px;border-radius:999px;font-size:.68rem;font-weight:800;background:${s.bg};color:${s.color}">${s.label}</span>`;
+    }
+    function v2MedianBadge(median) {
+      if (median == null) return '';
+      return `<span style="display:block;font-size:.68rem;color:#94a3b8;margin-top:2px">médiane : ${Number(median).toFixed(2)}\u00a0€</span>`;
+    }
+    // ── Module premium : Analyse de l'offre basse + badge anomaly P4 ────────
+    function renderLowPriceAnalysis(minVal, avgVal, srcCount, dispersion, marketState, v2Conf, anomalyClassification) {
+      if (!Number.isFinite(minVal) || !Number.isFinite(avgVal) || avgVal <= 0 || minVal <= 0) return '';
+      const ratio = minVal / avgVal;
+      if (ratio > 0.65) return '';
+
+      // ── Score fiabilité : sources (règle principale) ──────────────────────
+      const disp = Number.isFinite(dispersion) ? dispersion : 1;
+      let relLabel = '', relColor = '', relBg = '', relBorder = '';
+      if (srcCount >= 18 && disp <= 2.0) {
+        relLabel = '\u{1F7E2} Fiabilit\u00e9 \u00e9lev\u00e9e';   relColor = '#86efac'; relBg = '#071a0c'; relBorder = 'rgba(34,197,94,0.3)';
+      } else if (srcCount >= 8) {
+        relLabel = '\u{1F7E1} Fiabilit\u00e9 correcte'; relColor = '#fde68a'; relBg = '#1a1400'; relBorder = 'rgba(234,179,8,0.3)';
+      } else if (srcCount >= 3) {
+        relLabel = '\u{1F7E0} Fiabilit\u00e9 moyenne';  relColor = '#fb923c'; relBg = '#1a0900'; relBorder = 'rgba(249,115,22,0.3)';
+      } else {
+        relLabel = '\u{1F534} V\u00e9rification utile'; relColor = '#fca5a5'; relBg = '#1f0707'; relBorder = 'rgba(239,68,68,0.3)';
+      }
+
+      const delta = (100 - Math.round(ratio * 100));
+
+      // ── Badge anomaly intelligent (P4) ───────────────────────────────────
+      const cls = anomalyClassification || {};
+      const anomType = cls.type || 'UNKNOWN';
+      const anomBadge = cls.badge || '';
+      const anomColor = cls.color || '#f59e0b';
+      // Messages contextuels par type
+      const anomalyMessages = {
+        'PROMO_FLASH':    ['• Promotion temporaire d\u00e9tect\u00e9e', '• V\u00e9rification disponibilit\u00e9 recommand\u00e9e'],
+        'LAST_SIZE':      ['• Derni\u00e8res tailles probables', '• Stock limit\u00e9 en boutique'],
+        'CLEARANCE':      ['• Op\u00e9ration de d\u00e9stockage possible', '• Offre sur tailles moins demand\u00e9es'],
+        'KIDS_VARIANT':   ['• Variante enfant/junior d\u00e9tect\u00e9e', '• V\u00e9rifier la pointure avant commande'],
+        'USED_POSSIBLE':  ['• Produit d\u2019occasion possible', '• V\u00e9rifier l\u2019\u00e9tat du produit'],
+        'SCRAPING_ERROR': ['• Donn\u00e9e potentiellement incorrecte', '• Recharger dans quelques heures'],
+        'UNKNOWN':        ['• Derni\u00e8res tailles possibles', '• Promotion temporaire possible', '• Offre atypique possible'],
+        'NORMAL':         []
+      };
+      const msgs = anomalyMessages[anomType] || anomalyMessages['UNKNOWN'];
+      const anomBadgeHtml = (anomBadge && anomType !== 'NORMAL')
+        ? `<div style="display:inline-block;margin-bottom:6px;padding:3px 10px;border-radius:999px;font-size:.64rem;font-weight:800;background:${anomColor}22;color:${anomColor};border:1px solid ${anomColor}55">${anomBadge}</div>`
+        : '';
+      const msgLines = msgs.map(m => `<div style="font-size:clamp(.62rem,1.8vw,.7rem);color:#9fffd1;line-height:1.35">${m}</div>`).join('');
+
+      return `<div class="sb-low-offer-card" style="margin-top:6px;padding:8px 10px;background:#070f09;border:1px solid rgba(0,255,136,0.14);border-radius:10px;box-shadow:0 2px 16px rgba(0,0,0,0.5);animation:sbFadeUp .3s ease;min-width:0;width:100%;max-width:100%;white-space:normal;word-break:break-word;overflow:visible;overflow-wrap:anywhere">` +
+        `<div style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 6px;margin-bottom:5px;min-width:0">` +
+          `<span style="font-size:.58rem;font-weight:800;color:#00d876;letter-spacing:.05em;text-transform:uppercase;word-break:break-word;line-height:1.35">\uD83D\uDD0E\u00a0Analyse de l\u2019offre basse</span>` +
+          `<span style="font-size:.58rem;color:#4b5563;margin-left:auto;white-space:normal;word-break:break-word;line-height:1.35">\u2212${delta}% vs moy.</span>` +
+        `</div>` +
+        anomBadgeHtml +
+        `<div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;line-height:1.4;margin-bottom:6px;max-width:100%;overflow:visible;white-space:normal;word-break:break-word;overflow-wrap:anywhere">` +
+          msgLines +
+          (msgs.length === 0 || anomType === 'UNKNOWN' ? `<div style="font-size:clamp(.62rem,1.8vw,.7rem);color:#cbd5e1;line-height:1.35">\u2022 V\u00e9rification recommand\u00e9e</div>` : '') +
+        `</div>` +
+        `<div title="Score bas\u00e9 sur sources + coh\u00e9rence march\u00e9 + dispersion" style="display:inline-block;padding:2px 8px;border-radius:999px;font-size:.58rem;font-weight:700;background:${relBg};color:${relColor};border:1px solid ${relBorder};white-space:normal;line-height:1.35;cursor:help">${relLabel}</div>` +
+      `</div>`;
+    }
+
+    function renderRows(arr, relaxed=false) {
+      if (!arr.length) {
+        if (refreshModeActive && Array.isArray(lastRenderedItems) && lastRenderedItems.length) {
+          console.info('[UI] cached data preserved');
+          return;
+        }
+        rows.innerHTML = '<tr><td colspan="11" style="color:#9ca3af">Aucune donn\u00e9e pour ce filtre. S\u00e9lectionnez un autre mod\u00e8le.</td></tr>';
+        return;
+      }
+      lastRenderedItems = arr.slice();
+      const note = '';
+      rows.innerHTML = note + arr.map(it => {
+        const c = it.credibility === 'high' ? 'h' : (it.credibility === 'medium' ? 'm' : 'l');
+        const score = Number(it.score || 0);
+        const reason = it.excluded ? ` (exclu: ${it.exclusion_reason || 'raison_inconnue'})` : '';
+        const gBadge = String(it.google_badge || 'none');
+        const gDev = (it.google_deviation_pct == null) ? null : Number(it.google_deviation_pct);
+        let gCell = '—';
+        if (gBadge === 'ok') {
+          gCell = '🟢 Google ✅';
+        } else if (gBadge === 'warn') {
+          gCell = '🟡 Google ⚠️';
+        } else if (gBadge === 'bad') {
+          gCell = '🔴 Google ❌';
+        }
+        const gHint = gDev == null ? '' : ' <span style="color:#6b7280;font-size:.75rem;">(~' + gDev.toFixed(1) + '%)</span>';
+        const mid = sneakerModelId(it.brand, it.model);
+        const rec = String(it.recommandation || '👍 BON PRIX');
+        const pos = String(it.position_client || 'Milieu de gamme');
+        const recCls = recBadgeClass(rec);
+        const posCls = posBadgeClass(pos);
+        const safePrices = getSafePriceTriplet(it);
+        const marketState = String(it.market_state || 'stable');
+        const marketDisp = Number(it.dispersion || 0);
+        let marketText = 'Marché stable';
+        if (marketState === 'unstable') {
+          marketText = 'Marché instable – forte variation de prix';
+        } else if (marketState === 'variable') {
+          marketText = 'Prix variables selon les vendeurs';
+        }
+        const marketObservation = `<div class="market-observation ${escAttr(marketState)}">${marketText} (${
+          Number.isFinite(marketDisp) ? (marketDisp * 100).toFixed(1) : '0.0'
+        }%)</div>`;
+        const sourcesCount = Number(it.source_count || 0);
+        // v2: afficher nb outliers supprimés si dispo
+        const v2note = it.v2_enabled
+          ? ` · <span style="color:#6366f1;font-size:.68rem" title="Données filtrées par pipeline v2 (outliers supprimés)">⚡ v2</span>`
+          : '';
+        const premiumBadge = it.source_premium_used
+          ? ' · <span style="color:#fbbf24;font-size:.68rem" title="Validation SerpAPI Google Shopping FR">⭐ Source premium utilisée</span>'
+          : '';
+        const reliableBadge = it.reliable_range_used
+          ? ' · <span style="color:#22c55e;font-size:.68rem" title="Range fiable quartiles/médiane">Prix marché fiable</span>'
+          : '';
+        const filterHint = `<span class="cmp-filter-note">Analyse basée sur ${Number.isFinite(sourcesCount) ? sourcesCount : 0} sources (valeurs extrêmes filtrées)${v2note}${premiumBadge}${reliableBadge}</span>`;
+        const waMin = Number(it.price_min);
+        const waMsg = encodeURIComponent('🔥 ' + it.brand + ' ' + it.model + ' dès ' + (Number.isFinite(waMin) ? waMin : safePrices.safeAvg).toFixed(2).replace('.', ',') + ' € — sneakerbot.shop');
+        const waLink = 'https://wa.me/' + WA_NUMBER + '?text=' + waMsg;
+        const adminRawTooltip = (IS_ADMIN && it.reliable_range_used && Number.isFinite(Number(it.raw_price_min)) && Number.isFinite(Number(it.raw_price_max)))
+          ? ` title="Brut: ${Number(it.raw_price_min).toFixed(2)}€ - ${Number(it.raw_price_max).toFixed(2)}€"`
+          : '';
+        const minAnalysis = renderLowPriceAnalysis(safePrices.safeMin, safePrices.safeAvg, sourcesCount, marketDisp, marketState, it.v2_confidence, it.anomaly_classification);
+        const priceCells = `<td class="cmp-price"${minAnalysis ? ' style="vertical-align:top"' : ''}><span class="cmp-price-inner"${adminRawTooltip}>${safePrices.safeMin.toFixed(2)}${String.fromCharCode(0xA0)}€</span>${minAnalysis}</td>
+          <td class="cmp-price"><span class="cmp-price-inner">${safePrices.safeAvg.toFixed(2)}${String.fromCharCode(0xA0)}€${it.v2_median != null ? v2MedianBadge(it.v2_median) : ''}</span></td>
+          <td class="cmp-price"><span class="cmp-price-inner"${adminRawTooltip}>${safePrices.safeMax.toFixed(2)}${String.fromCharCode(0xA0)}€</span></td>`;
+        // P5 : indice popup sources pour clic délégué
+        const srcBadgeId = 'sb-src-' + mid;
+        return `<tr>
+          <td>${it.brand} ${it.model}</td>
+          ${priceCells}
+          <td>${score}/100</td>
+          <td><span class="pill ${c}">${it.credibility}</span>${it.v2_confidence ? v2ConfBadge(it.v2_confidence) : ''}<span style="color:#6b7280;font-size:.75rem;">${reason}</span></td>
+          <td>${gCell}${gHint}</td>
+          <td><span class="${recCls}" title="${escAttr(rec)}">${escAttr(rec)}</span></td>
+          <td><span class="${posCls}" title="${escAttr(pos)}">${escAttr(pos)}</span></td>
+          <td id="${escAttr(srcBadgeId)}">${renderSourcesBadge(it)}</td>
+          <td style="white-space:nowrap">
+            <a href="${waLink}" target="_blank" rel="noopener" class="btn-cmp-wa" title="Partager sur WhatsApp">💬 WA</a>
+            ${(Number(it.price_count || 0) > 1 || it.has_history) ? `<button type="button" class="btn-cmp-hist" data-mid="${escAttr(mid)}" title="Historique ~30 j.">Historique</button>` : ''}
+          </td>
+        </tr>
+        <tr class="cmp-observation-row">
+          <td colspan="11">${marketObservation}${filterHint}</td>
+        </tr>`;
+      }).join('');
+    }
+    if (rows) {
+      rows.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button.btn-cmp-hist');
+        if (btn && rows.contains(btn)) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const mid = btn.getAttribute('data-mid') || '';
+          if (mid) cmpOpenHistory(mid);
+          return;
+        }
+        const badge = ev.target.closest('.src-badge');
+        if (badge && rows.contains(badge)) {
+          ev.preventDefault();
+          // P5 : si badge cliquable avec sources premium → popup détaillée
+          if (badge.classList.contains('sb-sources-clickable')) {
+            // Retrouver l'item via l'ID de la cellule parente
+            const td = badge.closest('td');
+            if (td && td.id && td.id.startsWith('sb-src-')) {
+              const mid = td.id.slice(7); // retirer 'sb-src-'
+              const item = Array.isArray(lastRenderedItems)
+                ? lastRenderedItems.find(it => sneakerModelId(it.brand, it.model) === mid)
+                : null;
+              if (item) { showSourcesPopup(item); return; }
+            }
+          }
+          // Fallback : modal simple count
+          const count = Number(badge.getAttribute('data-count') || 0);
+          const body = document.getElementById('src-modal-body');
+          if (body) body.innerHTML = '<p style="font-size:0.95rem;margin:0">Ce produit est compar\u00e9 sur <strong>' + count + '</strong> boutique' + (count > 1 ? 's' : '') + ' fran\u00e7aise' + (count > 1 ? 's' : '') + '.</p>';
+          const ov = document.getElementById('src-modal-overlay');
+          if (ov) ov.classList.add('open');
+        }
+      });
+    }
+    const histOv = document.getElementById('modal-history-overlay');
+    if (histOv) histOv.addEventListener('click', (e) => { if (e.target === histOv) cmpCloseHistory(); });
+
+    function fetchWithTimeout(url, timeoutMs) {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+      return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(tid));
+    }
+    function simplifyModelName(name) {
+      const txt = String(name || '').trim();
+      if (!txt) return txt;
+      const parts = txt.split(/\s+/).filter(Boolean);
+      if (parts.length <= 2) return txt;
+      return parts.slice(0, 2).join(' ');
+    }
+    showSkeletonRows();
+    refreshHealthSignals();
+    setInterval(refreshHealthSignals, 30000);
+
+    // ── V2-first fetch strategy ───────────────────────────────────────────────
+    // 1. Try /api/v2/comparison/fr  (strict matching, anti-aberration)
+    // 2. If empty → fallback to /api/comparison/fr  (v1 aggregated)
+    // 3. If v1 also empty → try v1 with relaxed filters
+    function fetchV1Fallback(relaxed, simplifiedModel) {
+      const qs2 = new URLSearchParams(qs.toString());
+      if (simplifiedModel) qs2.set('model', simplifiedModel);
+      if (relaxed) {
+        qs2.set('validated_only', 'false');
+        qs2.set('include_excluded', 'true');
+      }
+      return fetchWithTimeout('/api/comparison/fr?' + qs2.toString(), 8000)
+        .then(r => { if (!r.ok && r.status === 401) throw new Error('auth'); return r.json(); })
+        .then(data => {
+          const arr = data.items || [];
+          if (arr.length) { renderRows(arr, relaxed); updateMarketHealth(arr); return; }
+          if (!relaxed) return fetchV1Fallback(true, simplifiedModel);
+          const selectedModel = (modelSelect && modelSelect.value) || window.__CMP__.selectedModel || '';
+          const simple = simplifyModelName(selectedModel);
+          if (!simplifiedModel && simple && simple !== selectedModel) {
+            console.warn('[CMP] Retry simplifié automatique', { brand: ((brandSelect && brandSelect.value) || window.__CMP__.selectedBrand || ''), model: selectedModel, simplified: simple });
+            return fetchV1Fallback(false, simple);
+          }
+          if (refreshModeActive && Array.isArray(lastRenderedItems) && lastRenderedItems.length) {
+            console.info('[UI] cached data preserved');
+            return;
+          }
+          if (rows) rows.innerHTML = '<tr><td colspan="11" style="color:#9ca3af">Aucune donnée immédiate disponible. Réessayez ou changez variante.</td></tr>';
+        });
+    }
+
+    fetchWithTimeout('/api/v2/comparison/fr?' + qs.toString(), 8000)
+      .then(r => { if (!r.ok && r.status === 401) throw new Error('auth'); return r.json(); })
+      .then(data => {
+        const arr = data.items || [];
+        if (arr.length) {
+          renderRows(arr, false);   // v2 data — badges rendered by renderRows
+          updateMarketHealth(arr);
+          return;
+        }
+        // v2 has no data for this model yet — fall back to v1
+        return fetchV1Fallback(false);
+      })
+      .catch(err => {
+        if (err && err.message === 'auth') {
+          if (rows) rows.innerHTML = '<tr><td colspan="11" style="color:#fca5a5">Session expirée. <a href="/login" style="color:#60a5fa">Reconnectez-vous</a>.</td></tr>';
+          return;
+        }
+        if (err && err.name === 'AbortError') {
+          // Timeout côté client — fallback local immédiat (v1/cache CSV)
+          const brand = (brandSelect && brandSelect.value) || window.__CMP__.selectedBrand || '';
+          const model = (modelSelect && modelSelect.value) || window.__CMP__.selectedModel || '';
+          console.warn('[CMP] Timeout v2 -> fallback local immédiat', { brand, model });
+          fetchV1Fallback(false).catch(function() {
+            if (refreshModeActive && Array.isArray(lastRenderedItems) && lastRenderedItems.length) {
+              console.info('[UI] cached data preserved');
+              return;
+            }
+            if (rows) rows.innerHTML = '<tr><td colspan="11" style="color:#9ca3af">Aucune donnée immédiate disponible. Réessayez ou changez variante.</td></tr>';
+          });
+          return;
+        }
+        // v2 endpoint error → fall back silently to v1
+        {
+          const brand = (brandSelect && brandSelect.value) || window.__CMP__.selectedBrand || '';
+          const model = (modelSelect && modelSelect.value) || window.__CMP__.selectedModel || '';
+          console.warn('[CMP] Erreur v2 -> fallback local', { brand, model, err: String((err && err.message) || err || '') });
+        }
+        fetchV1Fallback(false).catch(() => {
+          if (refreshModeActive && Array.isArray(lastRenderedItems) && lastRenderedItems.length) {
+            console.info('[UI] cached data preserved');
+            return;
+          }
+          if (rows) {
+            rows.innerHTML = '<tr><td colspan="11" style="color:#9ca3af">Aucune donnée immédiate disponible. Réessayez ou changez variante.</td></tr>';
+          }
+        });
+      });
+    const srcOv = document.getElementById('src-modal-overlay');
+    if (srcOv) srcOv.addEventListener('click', (e) => { if (e.target === srcOv) srcOv.classList.remove('open'); });
+    const srcClose = document.getElementById('src-modal-close');
+    if (srcClose) srcClose.addEventListener('click', () => { if (srcOv) srcOv.classList.remove('open'); });
+})();

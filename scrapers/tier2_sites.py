@@ -10,6 +10,7 @@ Délais : 1,5–3 s entre requêtes. Aucune exception ne remonte au pipeline (re
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re
@@ -20,6 +21,7 @@ from urllib.parse import quote_plus
 import requests
 
 from scrapers.base_scraper import BaseScraper
+from scrapers.utils.fetch_retry import fetch_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +73,15 @@ def _requests_then_playwright(
 
     for url in urls:
         try:
-            tier2_sleep()
-            r = requests.get(url, headers=_headers_html(), timeout=20, allow_redirects=True)
-            if r.status_code >= 400:
+            r = fetch_with_retry(
+                requests.Session(),
+                url,
+                timeout=20.0,
+                attempts=3,
+                headers=_headers_html(),
+                allow_redirects=True,
+            )
+            if r is None or r.status_code >= 400:
                 continue
             hits = _extract_hits(r.text, brand, model, source_name, str(r.url))
             if hits:
@@ -161,64 +169,102 @@ class WeThenewScraper:
             return []
 
 
+def _nike_fr_next_data_scrape(brand: str, model: str) -> list[dict[str, Any]]:
+    """
+    Extrait les prix Nike FR depuis __NEXT_DATA__ (JSON embarqué dans le HTML).
+    Fonctionne sans JS — Nike injecte l'état Redux initial dans la page HTML.
+    """
+    from scrapers.tier1_sites import _build_hit
+
+    brand = (brand or "").strip()
+    model = (model or "").strip()
+    if not brand or not model or brand.lower() != "nike":
+        return []
+
+    q = f"{brand} {model}".strip()
+    queries = [q, model]
+    from scrapers.utils.safe_http import get_safe_headers, safe_request
+
+    base_headers = {
+        **get_safe_headers(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+
+    for q_term in queries:
+        url = f"https://www.nike.com/fr/w?q={quote_plus(q_term)}&vst={quote_plus(q_term)}"
+        try:
+            r = fetch_with_retry(
+                requests.Session(),
+                url,
+                timeout=15.0,
+                attempts=3,
+                headers=base_headers,
+                allow_redirects=True,
+                min_body_chars=100,
+                require_status_ok=True,
+            )
+            if r is None:
+                r2 = safe_request(url, headers=base_headers, timeout=15, retries=2)
+                if r2 is not None:
+                    r = r2
+            if r is None or r.status_code != 200:
+                continue
+            m = re.search(
+                r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+                r.text, re.S,
+            )
+            if not m:
+                continue
+            data = json.loads(m.group(1))
+            groupings = (
+                data.get("props", {})
+                    .get("pageProps", {})
+                    .get("initialState", {})
+                    .get("Wall", {})
+                    .get("productGroupings", [])
+            )
+            hits: list[dict[str, Any]] = []
+            seen: set[float] = set()
+            for pg in groupings:
+                for p in pg.get("products", []):
+                    copy = p.get("copy") or {}
+                    name = str(copy.get("title") or "")
+                    price_data = p.get("prices") or {}
+                    price = price_data.get("currentPrice")
+                    if not price or not name:
+                        continue
+                    try:
+                        pf = round(float(price), 2)
+                    except (TypeError, ValueError):
+                        continue
+                    if not (25 <= pf <= 800) or pf in seen:
+                        continue
+                    seen.add(pf)
+                    pdp = str(p.get("pdpUrl") or "")
+                    product_url = f"https://www.nike.com{pdp}" if pdp.startswith("/") else url
+                    if not _name_matches_model(name, brand, model, skip_brand_in_title=True):
+                        continue
+                    hits.append(_build_hit(brand, model, pf, "nike.com/fr", product_url))
+                    if len(hits) >= 8:
+                        break
+                if len(hits) >= 8:
+                    break
+            if hits:
+                return hits
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[nike.com/fr] next_data %s: %s", q_term, e)
+
+    return []
+
+
 class NikeFrScraper:
+    """Nike FR — extraction via __NEXT_DATA__ (JSON embarqué). Activé 2026-04-09."""
+
     SOURCE_NAME = "nike.com/fr"
 
     def scrape_model(self, brand: str, model: str) -> list[dict]:
-        brand = (brand or "").strip()
-        model = (model or "").strip()
-        if not brand or not model or brand.lower() != "nike":
-            return []
-        q = f"{brand} {model}".strip()
-        urls = [
-            f"https://www.nike.com/fr/w?q={quote_plus(q)}&vst={quote_plus(q)}",
-            f"https://www.nike.com/fr/w?q={quote_plus(model)}&vst={quote_plus(model)}",
-            f"https://www.nike.com/fr/w?q={quote_plus(brand)}&vst={quote_plus(model)}",
-        ]
         try:
-            hits = _requests_then_playwright(self.SOURCE_NAME, brand, model, urls)
-            if hits:
-                return hits
-            from scrapers.anti_bot_diag import (
-                detect_block_reason,
-                dump_snapshot,
-                fetch_playwright_stealth,
-                fetch_via_scraperapi,
-                fetch_with_rotating_headers,
-            )
-            from scrapers.tier1_sites import _build_hit, extract_search_result_prices
-
-            for url in urls:
-                html = fetch_with_rotating_headers(url)
-                if html:
-                    prices = extract_search_result_prices(html, brand, model)
-                    for p in prices[:8]:
-                        hits.append(_build_hit(brand, model, p, self.SOURCE_NAME, url))
-                    if hits:
-                        return hits
-                reason = detect_block_reason(html)
-                if reason or not html:
-                    dump_snapshot(self.SOURCE_NAME, url, html, reason or "empty_html")
-
-                html = fetch_playwright_stealth(url, source_name=self.SOURCE_NAME)
-                if html:
-                    prices = extract_search_result_prices(html, brand, model)
-                    for p in prices[:8]:
-                        hits.append(_build_hit(brand, model, p, self.SOURCE_NAME, url))
-                    if hits:
-                        return hits
-                reason = detect_block_reason(html)
-                if reason or not html:
-                    dump_snapshot(self.SOURCE_NAME, url, html, reason or "empty_html")
-
-                html = fetch_via_scraperapi(url)
-                if html:
-                    prices = extract_search_result_prices(html, brand, model)
-                    for p in prices[:8]:
-                        hits.append(_build_hit(brand, model, p, self.SOURCE_NAME, url))
-                    if hits:
-                        return hits
-            return hits
+            return _nike_fr_next_data_scrape(brand, model)
         except Exception as e:  # noqa: BLE001
             logger.error("[%s] %s %s: %s", self.SOURCE_NAME, brand, model, e)
             return []
@@ -234,14 +280,15 @@ class AdidasFrScraper:
         if not brand or not model or brand.lower() != "adidas":
             return []
         try:
-            tier2_sleep()
-            r = requests.get(
+            r = fetch_with_retry(
+                requests.Session(),
                 self.API_URL,
+                timeout=20.0,
+                attempts=3,
                 params={"query": model, "start": 0, "count": 12},
                 headers=_headers_json(),
-                timeout=20,
             )
-            if r.status_code != 200:
+            if r is None or r.status_code != 200:
                 return []
             data = r.json()
             raw = data.get("raw") or data
@@ -481,6 +528,140 @@ class SalomonFrScraper:
             return []
 
 
+def _shopify_suggest_scrape(
+    base_url: str,
+    source_name: str,
+    brand: str,
+    model: str,
+    *,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """
+    Scraping via l'API Shopify suggest.json (requête JSON pure, pas de JS requis).
+    Retourne des hits {brand, model, price, source, url, currency}.
+    """
+    from scrapers.tier1_sites import _build_hit
+
+    brand = (brand or "").strip()
+    model = (model or "").strip()
+    if not brand or not model:
+        return []
+
+    queries = [f"{brand} {model}", model]
+    hits: list[dict[str, Any]] = []
+    seen_prices: set[float] = set()
+
+    for q in queries:
+        # Les brackets doivent être encodés %5B / %5D — sans ça Shopify retourne []
+        url = (
+            f"{base_url}/search/suggest.json"
+            f"?q={quote_plus(q)}"
+            f"&resources%5Btype%5D=product"
+            f"&resources%5Blimit%5D={limit}"
+        )
+        try:
+            r = fetch_with_retry(
+                requests.Session(),
+                url,
+                timeout=12.0,
+                attempts=3,
+                headers=_headers_json(),
+                allow_redirects=True,
+            )
+            if r is None or r.status_code != 200:
+                continue
+            products = (
+                r.json()
+                .get("resources", {})
+                .get("results", {})
+                .get("products", [])
+            )
+            for p in products:
+                try:
+                    raw_price = p["price"]
+                    # Shopify retourne parfois le prix en centimes (int) ou en euros (str/float)
+                    pf = float(str(raw_price).replace(",", "."))
+                    # Si le prix semble en centimes (> 1500 pour sneakers), diviser par 100
+                    if pf > 1500:
+                        pf = pf / 100.0
+                    price = round(pf, 2)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if not (10 <= price <= 1200) or price in seen_prices:
+                    continue
+                seen_prices.add(price)
+                raw_url = p.get("url", "")
+                product_url = (base_url + raw_url) if raw_url.startswith("/") else raw_url or base_url
+                hits.append(_build_hit(brand, model, price, source_name, product_url))
+        except Exception as e:  # noqa: BLE001
+            logger.debug("[%s] suggest.json %s %s: %s", source_name, brand, model, e)
+        if hits:
+            break
+
+    return hits[:8]
+
+
+class NoirFonceScraper:
+    """NOIRFONCE — boutique sneakers premium FR (Shopify). Activé 2026-04-08."""
+
+    SOURCE_NAME = "noirfonce.eu"
+    BASE_URL = "https://noirfonce.eu"
+
+    def scrape_model(self, brand: str, model: str) -> list[dict]:
+        try:
+            return _shopify_suggest_scrape(self.BASE_URL, self.SOURCE_NAME, brand, model)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[%s] %s %s: %s", self.SOURCE_NAME, brand, model, e)
+            return []
+
+
+class OverkillScraper:
+    """Overkill Shop — boutique sneakers premium (Shopify). Activé 2026-04-08."""
+
+    SOURCE_NAME = "overkillshop.com"
+    BASE_URL = "https://www.overkillshop.com"
+
+    def scrape_model(self, brand: str, model: str) -> list[dict]:
+        try:
+            return _shopify_suggest_scrape(self.BASE_URL, self.SOURCE_NAME, brand, model)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[%s] %s %s: %s", self.SOURCE_NAME, brand, model, e)
+            return []
+
+
+class AfewStoreScraper:
+    """Afew Store — boutique sneakers premium DE/FR (Shopify). Activé 2026-04-08."""
+
+    SOURCE_NAME = "afew-store.com"
+    BASE_URL = "https://www.afew-store.com"
+
+    def scrape_model(self, brand: str, model: str) -> list[dict]:
+        try:
+            return _shopify_suggest_scrape(self.BASE_URL, self.SOURCE_NAME, brand, model)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[%s] %s %s: %s", self.SOURCE_NAME, brand, model, e)
+            return []
+
+
+class FootdistrictScraper:
+    """Footdistrict — boutique sneakers premium ES/EU (Shopify). Activé 2026-04-09."""
+
+    SOURCE_NAME = "Footdistrict"
+    BASE_URL = "https://footdistrict.com"
+
+    def scrape_model(self, brand: str, model: str) -> list[dict]:
+        try:
+            return _shopify_suggest_scrape(self.BASE_URL, self.SOURCE_NAME, brand, model)
+        except Exception as e:  # noqa: BLE001
+            logger.error("[%s] %s %s: %s", self.SOURCE_NAME, brand, model, e)
+            return []
+
+
 TIER2_SCRAPER_CLASSES_REGISTERED: tuple[tuple[str, type], ...] = (
     ("Nike FR", NikeFrScraper),
+    ("WeThenew", WeThenewScraper),       # Activé 2026-04-08 — requests-only, marketplace resale FR
+    ("NOIRFONCE", NoirFonceScraper),     # Activé 2026-04-08 — Shopify AJAX, sneakers premium FR
+    ("Overkill", OverkillScraper),       # Activé 2026-04-08 — Shopify AJAX, sneakers premium EU
+    ("Afew Store", AfewStoreScraper),    # Activé 2026-04-08 — Shopify AJAX, sneakers premium DE/FR
+    ("Footdistrict", FootdistrictScraper),  # Activé 2026-04-09 — Shopify AJAX, sneakers premium ES/EU
 )

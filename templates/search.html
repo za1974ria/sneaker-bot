@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Recherche Sneakers | Sneakerbot.shop</title>
+  <meta name="description" content="Recherchez une marque et un modèle puis analysez le marché sneakers FR avec Sneakerbot.shop.">
+  <link rel="canonical" href="https://sneakerbot.shop/search">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Recherche Sneakers | Sneakerbot.shop">
+  <meta property="og:description" content="Analysez rapidement un modèle sneakers avec score et recommandations marché.">
+  <meta property="og:url" content="https://sneakerbot.shop/search">
+  <meta property="og:image" content="https://sneakerbot.shop/static/favicon.svg">
+  <style>
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .fade { animation: fadeInUp .45s ease both; }
+    .product-shell { margin-top:20px; }
+    .product-hero { display:flex; gap:16px; align-items:center; background:#111; border:1px solid #1f1f1f; border-radius:16px; padding:16px; }
+    .hero-media { width:120px; height:120px; border-radius:12px; overflow:hidden; background:#0f0f0f; border:1px solid #2a2a2a; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .hero-media img { width:100%; height:100%; object-fit:cover; }
+    .img-fallback { display:none; width:100%; height:100%; align-items:center; justify-content:center; font-size:2.6rem; }
+    .hero-content h2 { margin:0; font-size:2rem; font-weight:800; color:#f8fafc; }
+    .cred { margin-top:8px; display:inline-block; padding:6px 10px; border-radius:999px; font-size:.85rem; }
+    .badge-ok { background:rgba(34,197,94,.15); border:1px solid rgba(34,197,94,.4); color:#86efac; }
+    .badge-warn { background:rgba(245,158,11,.15); border:1px solid rgba(245,158,11,.4); color:#fcd34d; }
+    .badge-alert { background:rgba(239,68,68,.15); border:1px solid rgba(239,68,68,.4); color:#fca5a5; }
+    .market-grid { margin-top:16px; display:grid; gap:12px; grid-template-columns:1fr; }
+    .market-card { background:#121212; border:1px solid #2b2b2b; border-radius:14px; padding:14px; transition:border-color .2s ease, transform .2s ease; }
+    .market-card:hover { border-color:#22c55e; transform:translateY(-2px); }
+    .market-card.winner { border-color:#22c55e; box-shadow:0 0 0 1px rgba(34,197,94,.2) inset; }
+    .market-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+    .market-head h3 { margin:0; color:#fff; }
+    .badge-cheap { font-size:.75rem; background:#14532d; color:#bbf7d0; border:1px solid rgba(34,197,94,.45); border-radius:999px; padding:4px 8px; }
+    .price-bar { position:relative; height:34px; margin:10px 0 8px; }
+    .track { position:absolute; left:0; right:0; top:15px; height:4px; background:#1f2937; border-radius:999px; }
+    .dot { position:absolute; top:2px; transform:translateX(-50%); font-size:.67rem; font-weight:700; padding:2px 5px; border-radius:7px; }
+    .dot.min { background:#1d4ed8; color:#dbeafe; }
+    .dot.avg { background:#15803d; color:#dcfce7; }
+    .dot.max { background:#b91c1c; color:#fee2e2; }
+    .card-badges { display:flex; gap:6px; flex-wrap:wrap; min-height:24px; }
+    .badge-good { font-size:.72rem; background:#064e3b; color:#a7f3d0; border:1px solid rgba(16,185,129,.45); border-radius:999px; padding:4px 8px; }
+    .badge-high { font-size:.72rem; background:#4c0519; color:#fda4af; border:1px solid rgba(244,63,94,.45); border-radius:999px; padding:4px 8px; }
+    .analysis { margin-top:16px; border:1px solid #2a2a2a; border-radius:16px; background:linear-gradient(160deg, rgba(17,24,39,.65), rgba(2,6,23,.5)); padding:16px; }
+    .analysis h3 { margin:0 0 8px; }
+    .analysis p { margin:7px 0; color:#d1d5db; }
+    .analysis .reco { margin-top:10px; font-weight:800; color:#22c55e; }
+    .back-btn { display:inline-block; margin-top:18px; color:#22c55e; text-decoration:none; border:1px solid #22c55e55; border-radius:10px; padding:9px 14px; }
+    @media (max-width: 900px) { .market-grid { grid-template-columns:1fr; } .product-hero { flex-direction:column; align-items:flex-start; } }
+  </style>
+</head>
+<body style="background:#0b0b0b;color:white;font-family:sans-serif;padding:20px;max-width:1100px;margin:0 auto;">
+  <h1 style="margin:0 0 10px;">🔎 Recherche Sneaker (Marché France)</h1>
+  <p style="margin:0;color:#cbd5e1;font-size:.95rem;">Choisissez une marque et un modèle, puis analysez.</p>
+
+  <form method="get" action="/search" style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:center;">
+    <label style="display:block;">
+      <span style="display:block;margin-bottom:6px;color:#94a3b8;font-size:.8rem;">MARQUE</span>
+      <select name="brand" id="brandSelect" style="width:100%;padding:10px;border-radius:10px;border:1px solid #2d2d2d;background:#0f0f0f;color:#fff;">
+        {{ brand_options|safe }}
+      </select>
+    </label>
+    <label style="display:block;">
+      <span style="display:block;margin-bottom:6px;color:#94a3b8;font-size:.8rem;">MODÈLE</span>
+      <select name="model" id="modelSelect" style="width:100%;padding:10px;border-radius:10px;border:1px solid #2d2d2d;background:#0f0f0f;color:#fff;">
+        {{ model_options|safe }}
+      </select>
+    </label>
+    <button type="submit" style="padding:12px 16px;border-radius:12px;border:0;background:#00c896;color:#052e16;font-weight:800;cursor:pointer;">
+      Analyser
+    </button>
+  </form>
+
+  {{ result_block|safe }}
+
+  <a href="/" class="back-btn">← Retour</a>
+
+  <script>
+    const catalog = {{ js_catalog|safe }};
+    const brandSelect = document.getElementById("brandSelect");
+    const modelSelect = document.getElementById("modelSelect");
+
+    function refreshModels() {
+      const brand = brandSelect.value;
+      const models = catalog[brand] || [];
+      modelSelect.innerHTML = "";
+      if (!models.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "No model";
+        modelSelect.appendChild(opt);
+        return;
+      }
+      models.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        modelSelect.appendChild(opt);
+      });
+    }
+    brandSelect.addEventListener("change", refreshModels);
+  </script>
+</body>
+</html>

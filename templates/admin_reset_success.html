@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Reset credentials</title></head>
+<body style="background:#0d0d0d;color:#fff;font-family:Arial,sans-serif;padding:40px;text-align:center">
+  <h2 style="color:#00ff88">✅ Credentials réinitialisés !</h2>
+  <div style="background:#111;border:1px solid #00ff88;border-radius:8px;padding:20px;display:inline-block;margin:20px;text-align:left">
+    <p>👤 Login : <strong style="color:#00ff88">{{ username }}</strong></p>
+    <p>🔑 Nouveau mot de passe : <strong style="color:#00ff88">{{ new_password }}</strong></p>
+  </div>
+  {% if target_email %}
+  <p style="color:#9ca3af">Un email a été envoyé à <strong>{{ target_email }}</strong>.</p>
+  {% else %}
+  <p style="color:#fbbf15">Aucun email enregistré — communiquez le mot de passe au client.</p>
+  {% endif %}
+  <p><a href="/admin/subscriptions" style="color:#00ff88">← Retour admin</a></p>
+</body>
+</html>

@@ -68,10 +68,17 @@ def _hyper_sleep() -> None:
     time.sleep(random.uniform(0.45, 0.55))
 
 
-def _fetch_html_playwright(url: str, *, source_name: str, max_retries: int = 2) -> str | None:
+def _fetch_html_playwright(
+    url: str,
+    *,
+    source_name: str,
+    max_retries: int = 2,
+    goto_timeout_ms: int = 15000,
+) -> str | None:
     """Rendu JS (SPA) avec retry exponentiel et limites mémoire Chromium.
 
     Retourne None si Playwright indisponible ou erreur — pas d’exception vers le pipeline.
+    goto_timeout_ms : timeout goto() en ms (défaut 15s — réduit de 40s pour limiter les threads bloquants).
     """
     try:
         import playwright  # noqa: F401
@@ -106,7 +113,7 @@ def _fetch_html_playwright(url: str, *, source_name: str, max_retries: int = 2) 
                         context = browser.new_context(**_ctx_kwargs)
                         page = context.new_page()
                         try:
-                            page.goto(url, wait_until="domcontentloaded", timeout=40000)
+                            page.goto(url, wait_until="domcontentloaded", timeout=goto_timeout_ms)
                             try:
                                 page.wait_for_load_state("networkidle", timeout=8000)
                             except Exception:

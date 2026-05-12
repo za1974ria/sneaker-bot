@@ -1,384 +1,468 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#0d0d0d">
-  <meta name="color-scheme" content="dark">
-  <title>PrixDesBaskets — Suivi des prix sneakers FR</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sneakerbot.shop — Comparateur Prix Sneakers en Temps Réel</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <meta name="description" content="Compare les prix sneakers en temps réel. {{ shop_count }}+ boutiques analysées. Nike, Adidas, New Balance, Salomon et plus. Trouve la meilleure offre en secondes.">
+  <link rel="canonical" href="{{ canonical_url or 'https://sneakerbot.shop/landing' }}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Sneakerbot.shop — Comparateur Prix Sneakers en Temps Réel">
+  <meta property="og:description" content="Compare les prix sneakers en temps réel. {{ shop_count }}+ boutiques analysées. Trouve la meilleure offre en secondes.">
+  <meta property="og:url" content="{{ og_url or canonical_url or 'https://sneakerbot.shop/landing' }}">
+  <meta property="og:image" content="{{ og_image or 'https://sneakerbot.shop/static/favicon.svg' }}">
   <style>
-    :root {
-      --bg: #0d0d0d;
-      --bg2: #121212;
-      --border: #1f1f1f;
-      --text: #f4f4f5;
-      --muted: #a1a1aa;
-      --accent: #00ff88;
-      --accent-dim: rgba(0, 255, 136, 0.12);
-      --radius: 14px;
-      --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    /* ── Variables ────────────────────────────────────────────────────────── */
+    :root{
+      --bg:#08100d;
+      --bg2:#0c1610;
+      --card:#101814;
+      --card2:#131f18;
+      --txt:#f0f5f2;
+      --muted:#8a9e96;
+      --accent:#00ff88;
+      --accent2:#00d874;
+      --accent-glow:rgba(0,255,136,.15);
+      --border:#1c2e24;
+      --border2:#243a2e;
+      --green-dim:#9fffd1;
+      --radius:14px;
     }
-    * { box-sizing: border-box; }
-    html { scroll-behavior: smooth; }
-    body {
-      margin: 0;
-      font-family: var(--font);
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.55;
-      -webkit-text-size-adjust: 100%;
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{background:var(--bg);color:var(--txt);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;-webkit-font-smoothing:antialiased;line-height:1.5}
+    a{text-decoration:none;color:inherit}
+
+    /* ── Wrap ─────────────────────────────────────────────────────────────── */
+    .wrap{max-width:1060px;margin:0 auto;padding:0 20px 80px}
+
+    /* ── Nav ──────────────────────────────────────────────────────────────── */
+    .nav{display:flex;align-items:center;justify-content:space-between;padding:20px 0;border-bottom:1px solid var(--border)}
+    .logo{font-size:1.08rem;font-weight:800;letter-spacing:-.3px;display:flex;align-items:center;gap:6px}
+    .logo-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.6;transform:scale(.85)}}
+    .logo-name span{color:var(--accent)}
+    .nav-actions{display:flex;align-items:center;gap:10px}
+    .nav-link{font-size:.875rem;color:var(--muted);padding:7px 16px;border:1px solid var(--border);border-radius:8px;transition:all .18s}
+    .nav-link:hover{border-color:var(--accent);color:var(--accent);background:#0d201a}
+    .nav-cta{font-size:.875rem;font-weight:700;color:#021a0e;background:linear-gradient(135deg,var(--accent2),var(--accent));padding:7px 18px;border-radius:8px;border:none;transition:filter .18s,transform .18s,box-shadow .18s}
+    .nav-cta:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,255,136,.25)}
+
+    /* ── Hero ─────────────────────────────────────────────────────────────── */
+    .hero{padding:72px 0 52px;text-align:center}
+    .hero-eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:.775rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);background:#071a10;border:1px solid #1a4030;border-radius:999px;padding:5px 14px;margin-bottom:26px}
+    .eyebrow-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);flex-shrink:0}
+
+    h1{font-size:3.1rem;line-height:1.08;font-weight:900;letter-spacing:-.6px;margin-bottom:20px}
+    h1 .hl{color:var(--accent)}
+    h1 .hl2{
+      background:linear-gradient(90deg,var(--accent),#6fffbd);
+      -webkit-background-clip:text;
+      -webkit-text-fill-color:transparent;
+      background-clip:text;
     }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 28px); }
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(18px); }
-      to { opacity: 1; transform: translateY(0); }
+    .hero-sub{font-size:1.1rem;color:var(--muted);line-height:1.7;max-width:580px;margin:0 auto 14px}
+    .hero-sub b{color:var(--green-dim)}
+
+    /* ── Trust strip ──────────────────────────────────────────────────────── */
+    .trust-strip{display:flex;flex-wrap:wrap;justify-content:center;gap:10px;margin:28px 0 36px}
+    .trust-pill{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:999px;background:var(--card);border:1px solid var(--border2);font-size:.875rem;font-weight:600;color:var(--green-dim);white-space:nowrap}
+    .trust-pill .ti{font-size:1rem}
+
+    /* ── CTA bloc ─────────────────────────────────────────────────────────── */
+    .cta-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-bottom:20px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:12px;padding:14px 28px;font-weight:700;font-size:1rem;border:1px solid transparent;cursor:pointer;transition:all .18s}
+    .btn-main{background:linear-gradient(135deg,var(--accent2),var(--accent));color:#021a0e;box-shadow:0 4px 20px rgba(0,255,136,.2)}
+    .btn-main:hover{filter:brightness(1.08);transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,255,136,.3)}
+    .btn-ghost{background:transparent;color:var(--txt);border-color:var(--border2)}
+    .btn-ghost:hover{border-color:var(--accent);color:var(--accent);transform:translateY(-2px);box-shadow:0 8px 20px rgba(0,255,136,.1)}
+    .cta-hint{font-size:.84rem;color:#7aae98;margin-bottom:0}
+
+    /* ── Live stats card ──────────────────────────────────────────────────── */
+    .live-card{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:1px;background:var(--border);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin:52px 0 0}
+    .live-stat{background:var(--card);padding:22px 20px;text-align:center}
+    .live-stat-icon{font-size:1.4rem;margin-bottom:8px}
+    .live-stat-val{font-size:1.7rem;font-weight:900;color:var(--txt);letter-spacing:-.5px;line-height:1}
+    .live-stat-val span{font-size:1rem;font-weight:700;color:var(--accent)}
+    .live-stat-label{font-size:.8rem;color:var(--muted);margin-top:5px;text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+    .live-stat-sub{font-size:.78rem;color:#5a7a6a;margin-top:3px}
+
+    /* ── Sections ─────────────────────────────────────────────────────────── */
+    .sec{margin-top:24px;padding:30px 28px;border:1px solid var(--border);border-radius:var(--radius);background:var(--card)}
+    .sec-header{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+    .sec-icon{font-size:1.3rem}
+    h2{font-size:1.4rem;font-weight:800;letter-spacing:-.2px;color:var(--txt)}
+    .sec-sub{font-size:.95rem;color:var(--muted);line-height:1.65;margin-bottom:0}
+
+    /* ── Steps ───────────────────────────────────────────────────────────── */
+    .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-top:18px;counter-reset:step}
+    .step{padding:18px 18px 18px 50px;border-radius:12px;background:var(--card2);border:1px solid var(--border);counter-increment:step;position:relative}
+    .step::before{content:counter(step);position:absolute;left:14px;top:18px;font-size:1.4rem;font-weight:900;color:var(--accent);opacity:.4;line-height:1}
+    .step b{display:block;color:var(--txt);margin-bottom:4px;font-size:.95rem}
+    .step span{font-size:.85rem;color:var(--muted)}
+
+    /* ── Cards bénéfices ──────────────────────────────────────────────────── */
+    .benefit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:10px;margin-top:18px}
+    .benefit{padding:18px;border-radius:12px;background:var(--card2);border:1px solid var(--border)}
+    .benefit-icon{font-size:1.3rem;margin-bottom:10px}
+    .benefit b{display:block;color:#e8f5ed;margin-bottom:5px;font-size:.95rem}
+    .benefit span{font-size:.83rem;color:var(--muted);line-height:1.55}
+
+    /* ── Testimonials ─────────────────────────────────────────────────────── */
+    .testimonial{margin-top:18px;padding:20px 22px;border-radius:12px;background:var(--card2);border:1px solid var(--border2);text-align:center}
+    .stars{color:#ffd166;letter-spacing:2px;font-size:1.05rem;margin-bottom:10px}
+    .t-quote{font-size:1rem;color:#d0ead9;font-style:italic;line-height:1.6;transition:opacity .4s ease}
+    .t-author{margin-top:9px;font-size:.82rem;color:#8a9e96}
+
+    /* ── Prix range bar ───────────────────────────────────────────────────── */
+    .price-range{margin-top:20px;padding:20px;border-radius:12px;background:var(--card2);border:1px solid var(--border)}
+    .pr-labels{display:flex;justify-content:space-between;font-size:.85rem;color:var(--muted);margin-bottom:8px}
+    .pr-labels b{color:var(--txt)}
+    .pr-bar{height:6px;border-radius:999px;background:linear-gradient(90deg,var(--accent2),#6fffbd)}
+    .pr-brands{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+    .pr-brand{padding:5px 11px;border-radius:999px;background:#0d1d15;border:1px solid var(--border);font-size:.8rem;color:var(--green-dim);font-weight:600}
+
+    /* ── Pills ───────────────────────────────────────────────────────────── */
+    .pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+    .pill{padding:7px 14px;border-radius:999px;background:#0d1d15;border:1px solid var(--border2);color:var(--green-dim);font-weight:600;font-size:.88rem}
+
+    /* ── CTA final ────────────────────────────────────────────────────────── */
+    .cta-final{text-align:center;padding:48px 24px;margin-top:24px;border:1px solid var(--border2);border-radius:var(--radius);background:linear-gradient(160deg,var(--card) 0%,#0b1c13 100%);position:relative;overflow:hidden}
+    .cta-final::before{content:"";position:absolute;top:-60px;left:50%;transform:translateX(-50%);width:400px;height:200px;background:radial-gradient(ellipse,rgba(0,255,136,.06) 0%,transparent 70%);pointer-events:none}
+    .cta-final h2{font-size:2rem;margin-bottom:12px}
+    .cta-final p{color:var(--muted);max-width:460px;margin:0 auto 28px;font-size:.97rem}
+
+    /* ── Footer ───────────────────────────────────────────────────────────── */
+    .foot{text-align:center;margin-top:48px;color:var(--muted);font-size:.86rem;line-height:1.9}
+    .foot a{color:var(--accent);transition:opacity .15s}
+    .foot a:hover{opacity:.8}
+    .seo-links{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+    .seo-links a{font-size:.82rem;color:var(--green-dim);border:1px solid var(--border2);border-radius:999px;padding:5px 11px;transition:border-color .15s}
+    .seo-links a:hover{border-color:var(--accent)}
+
+    /* ── Responsive ───────────────────────────────────────────────────────── */
+    @media(max-width:680px){
+      h1{font-size:2.15rem;letter-spacing:-.3px}
+      .hero{padding:48px 0 36px}
+      .hero-sub{font-size:.97rem}
+      .btn{padding:13px 22px;font-size:.95rem}
+      .sec{padding:22px 18px}
+      .live-card{grid-template-columns:repeat(2,1fr)}
+      .nav-link{display:none}
+      .cta-final h2{font-size:1.6rem}
     }
-    .reveal {
-      opacity: 0;
-      transform: translateY(16px);
-      transition: opacity 0.55s ease, transform 0.55s ease;
+    @media(max-width:400px){
+      h1{font-size:1.85rem}
+      .live-card{grid-template-columns:1fr 1fr}
+      .trust-pill{font-size:.8rem;padding:6px 12px}
     }
-    .reveal.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    /* Nav */
-    .nav {
-      position: sticky; top: 0; z-index: 100;
-      background: rgba(13, 13, 13, 0.92);
-      backdrop-filter: blur(10px);
-      border-bottom: 1px solid var(--border);
-    }
-    .nav-inner {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 0; flex-wrap: wrap; gap: 12px;
-    }
-    .logo { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 1.15rem; color: var(--text); }
-    .logo:hover { text-decoration: none; color: var(--accent); }
-    .nav-links { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
-    .nav-links a { color: var(--muted); font-size: 0.9rem; font-weight: 600; }
-    .nav-links a:hover { color: var(--accent); text-decoration: none; }
-    .btn {
-      display: inline-flex; align-items: center; justify-content: center;
-      padding: 12px 22px; border-radius: 10px; font-weight: 800; font-size: 0.92rem;
-      border: none; cursor: pointer; transition: transform 0.15s ease, filter 0.15s ease;
-    }
-    .btn:active { transform: scale(0.98); }
-    .btn-primary { background: var(--accent); color: #052818; }
-    .btn-primary:hover { filter: brightness(1.08); text-decoration: none; }
-    .btn-ghost {
-      background: transparent; color: var(--accent);
-      border: 1px solid rgba(0, 255, 136, 0.45);
-    }
-    .btn-ghost:hover { background: var(--accent-dim); text-decoration: none; }
-    .btn-lg { padding: 16px 32px; font-size: 1rem; border-radius: 12px; }
-    /* Hero */
-    .hero {
-      padding: clamp(36px, 8vw, 72px) 0 clamp(40px, 7vw, 64px);
-      text-align: center;
-      animation: fadeUp 0.7s ease both;
-    }
-    .hero-badge {
-      display: inline-block; margin-bottom: 18px;
-      padding: 6px 14px; border-radius: 999px;
-      background: var(--accent-dim); color: var(--accent);
-      font-size: 0.82rem; font-weight: 700; letter-spacing: 0.02em;
-    }
-    .hero h1 {
-      margin: 0 0 16px;
-      font-size: clamp(1.75rem, 5vw, 2.55rem);
-      font-weight: 800; letter-spacing: -0.03em; line-height: 1.15;
-    }
-    .hero .lead {
-      margin: 0 auto 28px; max-width: 560px;
-      color: var(--muted); font-size: clamp(1rem, 2.4vw, 1.12rem);
-    }
-    .hero-cta { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 20px; }
-    .hero-note { font-size: 0.84rem; color: var(--muted); }
-    /* Stats */
-    .stats {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 14px; margin-top: 8px;
-    }
-    .stat-card {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 18px 16px; text-align: center;
-    }
-    .stat-card strong {
-      display: block; font-size: clamp(1.35rem, 4vw, 1.65rem);
-      color: var(--accent); font-weight: 800; margin-bottom: 4px;
-    }
-    .stat-card span { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-    /* Sections */
-    section { padding: clamp(48px, 7vw, 72px) 0; border-top: 1px solid var(--border); }
-    section h2 {
-      margin: 0 0 10px; font-size: clamp(1.35rem, 3.5vw, 1.75rem);
-      font-weight: 800; text-align: center;
-    }
-    .section-intro {
-      text-align: center; color: var(--muted); max-width: 520px;
-      margin: 0 auto 36px; font-size: 0.98rem;
-    }
-    .grid-3 {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 18px;
-    }
-    .card {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 22px 20px;
-      transition: border-color 0.2s ease;
-    }
-    .card:hover { border-color: rgba(0, 255, 136, 0.25); }
-    .card .icon { font-size: 1.6rem; margin-bottom: 10px; }
-    .card h3 { margin: 0 0 10px; font-size: 1.05rem; font-weight: 700; }
-    .card p { margin: 0; color: var(--muted); font-size: 0.9rem; line-height: 1.5; }
-    /* Pricing */
-    .pricing-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 20px; align-items: stretch;
-    }
-    .price-card {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 26px 22px;
-      display: flex; flex-direction: column; position: relative;
-    }
-    .price-card.featured {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 1px rgba(0, 255, 136, 0.2);
-    }
-    .price-badge {
-      position: absolute; top: -10px; right: 16px;
-      background: var(--accent); color: #052818;
-      font-size: 0.68rem; font-weight: 800; padding: 4px 10px; border-radius: 6px;
-      text-transform: uppercase; letter-spacing: 0.04em;
-    }
-    .price-card h3 { margin: 0 0 6px; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
-    .price-card .amount { font-size: 1.85rem; font-weight: 800; color: var(--text); margin-bottom: 16px; }
-    .price-card ul { margin: 0 0 22px; padding: 0 0 0 1.1rem; color: var(--muted); font-size: 0.9rem; flex: 1; }
-    .price-card li { margin-bottom: 8px; }
-    .price-card .btn { width: 100%; }
-    /* Testimonials */
-    .quote {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 22px;
-      font-style: italic; color: #d4d4d8; font-size: 0.95rem;
-    }
-    .quote footer { margin-top: 14px; font-style: normal; font-size: 0.82rem; color: var(--muted); }
-    /* FAQ */
-    details {
-      background: var(--bg2); border: 1px solid var(--border);
-      border-radius: 12px; padding: 14px 18px; margin-bottom: 10px;
-    }
-    details summary { cursor: pointer; font-weight: 700; color: var(--text); }
-    details[open] summary { margin-bottom: 10px; color: var(--accent); }
-    details p { margin: 0; color: var(--muted); font-size: 0.9rem; }
-    /* CTA */
-    .cta-final {
-      text-align: center; padding: clamp(48px, 8vw, 80px) 24px;
-      background: linear-gradient(180deg, var(--bg2) 0%, var(--bg) 100%);
-      border-radius: var(--radius); border: 1px solid var(--border);
-      margin-bottom: 24px;
-    }
-    .cta-final h2 { margin-bottom: 12px; }
-    .cta-final .sub { color: var(--muted); margin-bottom: 22px; font-size: 0.95rem; }
-    footer {
-      padding: 28px 0 40px; border-top: 1px solid var(--border);
-      text-align: center; color: var(--muted); font-size: 0.85rem;
-    }
-    footer a { color: var(--muted); }
-    footer a:hover { color: var(--accent); }
   </style>
 </head>
 <body>
-  <header class="nav">
-    <div class="wrap nav-inner">
-      <a class="logo" href="/">👟 PrixDesBaskets</a>
-      <nav class="nav-links">
-        <a href="#fonctionnalites">Fonctionnalités</a>
-        <a href="#tarifs">Tarifs</a>
-        <a href="#faq">FAQ</a>
-        <a href="/login">Connexion</a>
-        <a class="btn btn-primary" href="/subscribe" style="padding:8px 16px;font-size:0.85rem">Essayer</a>
-      </nav>
+<div class="wrap">
+
+  <!-- ── Nav ────────────────────────────────────────────────────────────── -->
+  <nav class="nav">
+    <div class="logo">
+      <div class="logo-dot"></div>
+      <div class="logo-name">sneakerbot<span>.shop</span></div>
     </div>
-  </header>
+    <div class="nav-actions">
+      <a class="nav-link" href="/comparison">Comparateur</a>
+      <a class="nav-cta" href="{{ cta_primary }}">Essai gratuit</a>
+    </div>
+  </nav>
 
-  <main>
-    <section class="hero">
-      <div class="wrap">
-        <span class="hero-badge">⭐ 88/100 fiabilité IA</span>
-        <h1>Suivez les prix sneakers en temps réel</h1>
-        <p class="lead" id="hero-sub">
-          <span id="hero-stats-line">148 modèles • 17 sources • Mis à jour toutes les 5h</span>
-        </p>
-        <div class="hero-cta">
-          <a class="btn btn-primary" href="/subscribe">Essayer gratuitement</a>
-          <a class="btn btn-ghost" href="/comparison">Voir la démo</a>
-        </div>
-        <p class="hero-note">Données marché France — agrégation multi-boutiques</p>
+  <!-- ── Hero ───────────────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero-eyebrow">
+      <span class="eyebrow-dot"></span>
+      Radar Prix Sneakers · Temps Réel
+    </div>
+
+    <h1>
+      Compare les prix sneakers<br>
+      <span class="hl2">en temps réel.</span>
+    </h1>
+    <p class="hero-sub">
+      Trouve la meilleure offre en secondes.<br>
+      <b>{{ shop_count }}+ boutiques analysées</b> · mises à jour continues · économies réelles.
+    </p>
+
+    <!-- Trust pills -->
+    <div class="trust-strip">
+      <span class="trust-pill"><span class="ti">🟢</span> {{ shop_count }} boutiques vérifiées</span>
+      <span class="trust-pill"><span class="ti">🕒</span> Mise à jour {{ last_update_human }}</span>
+      <span class="trust-pill"><span class="ti">💸</span> Prix {{ price_min }}€ → {{ price_max }}€</span>
+      <span class="trust-pill"><span class="ti">⭐</span> Fiabilité {{ reliability_pct }}%</span>
+    </div>
+
+    <!-- CTA -->
+    <div class="cta-row">
+      <a class="btn btn-main" href="{{ cta_primary }}">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M8 1v14M1 8h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Essayer gratuitement
+      </a>
+      <a class="btn btn-ghost" href="/comparison">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.5"/><path d="M8 5v3l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Voir comparaison live
+      </a>
+    </div>
+    <p class="cta-hint">⚡ Aucune carte requise — accès immédiat</p>
+
+    <!-- Live stats card -->
+    <div class="live-card">
+      <div class="live-stat">
+        <div class="live-stat-icon">📦</div>
+        <div class="live-stat-val">{{ model_count }}<span>+</span></div>
+        <div class="live-stat-label">Modèles suivis</div>
+        <div class="live-stat-sub">Nike, Adidas, NB…</div>
       </div>
-    </section>
-
-    <section id="stats" class="wrap reveal">
-      <h2>Stats en direct</h2>
-      <p class="section-intro">Chiffres issus de notre base <strong>market FR</strong>, mis à jour automatiquement.</p>
-      <div class="stats">
-        <div class="stat-card"><strong id="st-models">—</strong><span>Modèles suivis</span></div>
-        <div class="stat-card"><strong id="st-sources">—</strong><span>Sources actives</span></div>
-        <div class="stat-card"><strong id="st-avg">—</strong><span>Prix moyen</span></div>
-        <div class="stat-card"><strong id="st-maj" style="font-size:1rem">—</strong><span>Dernière MAJ</span></div>
+      <div class="live-stat">
+        <div class="live-stat-icon">🏪</div>
+        <div class="live-stat-val">{{ shop_count }}<span>+</span></div>
+        <div class="live-stat-label">Boutiques</div>
+        <div class="live-stat-sub">Sources vérifiées</div>
       </div>
-    </section>
-
-    <section id="fonctionnalites">
-      <div class="wrap">
-        <h2 class="reveal">Fonctionnalités</h2>
-        <p class="section-intro reveal">Tout ce dont vous avez besoin pour piloter vos prix sneakers sur le marché français.</p>
-        <div class="grid-3">
-          <article class="card reveal"><div class="icon">🔍</div><h3>Scraping multi-sources</h3><p>17 sites français analysés automatiquement pour chaque modèle.</p></article>
-          <article class="card reveal"><div class="icon">🤖</div><h3>Validation IA Groq</h3><p>Les prix aberrants sont détectés et filtrés avant publication.</p></article>
-          <article class="card reveal"><div class="icon">📊</div><h3>Historique 30 jours</h3><p>Suivez les tendances hausse, baisse ou stabilité sur un mois.</p></article>
-          <article class="card reveal"><div class="icon">🔔</div><h3>Alertes prix</h3><p>Soyez notifié lorsqu’un prix baisse significativement (ex. 10&nbsp;%).</p></article>
-          <article class="card reveal"><div class="icon">📥</div><h3>Export WooCommerce</h3><p>CSV prêt à importer en un clic dans votre boutique.</p></article>
-          <article class="card reveal"><div class="icon">⭐</div><h3>Score de crédibilité</h3><p>Chaque agrégat est noté sur 100 pour qualifier la fiabilité.</p></article>
-        </div>
+      <div class="live-stat">
+        <div class="live-stat-icon">💸</div>
+        <div class="live-stat-val">{{ price_min }}<span>€</span></div>
+        <div class="live-stat-label">Prix le plus bas</div>
+        <div class="live-stat-sub">Disponible maintenant</div>
       </div>
-    </section>
-
-    <section id="tarifs">
-      <div class="wrap">
-        <h2 class="reveal">Tarifs</h2>
-        <p class="section-intro reveal">Choisissez l’offre adaptée à votre activité. Sans engagement sur l’essai.</p>
-        <div class="pricing-grid">
-          <div class="price-card reveal">
-            <h3>Essai gratuit</h3>
-            <div class="amount">0€</div>
-            <ul>
-              <li>5 essais offerts</li>
-              <li>Puis 1&nbsp;€ pour 2 essais supplémentaires</li>
-              <li>Accès complet au tableau de bord</li>
-              <li>Découverte du comparateur FR</li>
-            </ul>
-            <a class="btn btn-ghost" href="/subscribe">Commencer</a>
-          </div>
-          <div class="price-card reveal">
-            <h3>Mensuel</h3>
-            <div class="amount">29€<small style="font-size:0.55em;font-weight:600;color:var(--muted)">/mois</small></div>
-            <ul>
-              <li>148 modèles suivis</li>
-              <li>Mises à jour toutes les 5&nbsp;h</li>
-              <li>Export WooCommerce</li>
-              <li>Alertes prix</li>
-              <li>10 jours offerts au 1<sup>er</sup> abonnement</li>
-            </ul>
-            <a class="btn btn-primary" href="/subscribe">S’abonner</a>
-          </div>
-          <div class="price-card featured reveal">
-            <span class="price-badge">Meilleure offre</span>
-            <h3>Annuel</h3>
-            <div class="amount">190€<small style="font-size:0.55em;font-weight:600;color:var(--muted)">/an</small></div>
-            <ul>
-              <li>Tout le mensuel</li>
-              <li>Économisez l’équivalent de 158€/an vs mensuel</li>
-              <li>Priorité sur les nouveautés catalogue</li>
-            </ul>
-            <a class="btn btn-primary" href="/subscribe">S’abonner</a>
-          </div>
-        </div>
+      <div class="live-stat">
+        <div class="live-stat-icon">🔄</div>
+        <div class="live-stat-val" id="js-update-val">—</div>
+        <div class="live-stat-label">Dernière MAJ</div>
+        <div class="live-stat-sub" id="js-update-sub">{{ last_update_human }}</div>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section id="temoignages">
-      <div class="wrap">
-        <h2 class="reveal">Ils nous font confiance</h2>
-        <p class="section-intro reveal">Retours de professionnels du retail et de l’e-commerce.</p>
-        <div class="grid-3">
-          <blockquote class="quote reveal">«&nbsp;Gain de temps énorme pour ma boutique.&nbsp;»<footer>— Thomas L., gérant boutique, Paris</footer></blockquote>
-          <blockquote class="quote reveal">«&nbsp;Les alertes prix m’ont évité des pertes sur des lignes surstockées.&nbsp;»<footer>— Sarah M., e-commerce, Lyon</footer></blockquote>
-          <blockquote class="quote reveal">«&nbsp;Export WooCommerce parfait, facile à utiliser au quotidien.&nbsp;»<footer>— Karim B., dropshipper, Marseille</footer></blockquote>
-        </div>
+  <!-- ── Pourquoi Sneakerbot ─────────────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-header">
+      <span class="sec-icon">🎯</span>
+      <h2>Le marché sneaker est opaque. Pas pour vous.</h2>
+    </div>
+    <p class="sec-sub">Prix différents selon les boutiques, promotions cachées, stocks mouvants.<br>
+    Sneakerbot centralise tout pour vous donner une lecture claire avant chaque achat.</p>
+    <div class="pills">
+      <span class="pill">Moins de recherche</span>
+      <span class="pill">Plus de clarté</span>
+      <span class="pill">Meilleure décision</span>
+      <span class="pill">Gain de temps réel</span>
+    </div>
+  </section>
+
+  <!-- ── Prix disponibles ────────────────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-header">
+      <span class="sec-icon">📊</span>
+      <h2>Fourchettes de prix disponibles maintenant</h2>
+    </div>
+    <div class="price-range">
+      <div class="pr-labels">
+        <span>Min <b>{{ price_min }}€</b></span>
+        <span>Moyen <b id="js-avg">—</b></span>
+        <span>Max <b>{{ price_max }}€</b></span>
       </div>
-    </section>
-
-    <section id="faq">
-      <div class="wrap" style="max-width:720px">
-        <h2 class="reveal">FAQ</h2>
-        <p class="section-intro reveal">Réponses rapides aux questions les plus fréquentes.</p>
-        <div class="reveal">
-          <details><summary>Comment fonctionne l’essai gratuit&nbsp;?</summary><p>5 comparaisons gratuites, sans carte bancaire. Une fois ce quota consommé, chaque tranche de 2 essais coûte 1&nbsp;€ (crédit enregistré sur votre compte par l’administrateur).</p></details>
-          <details><summary>Les prix sont-ils fiables&nbsp;?</summary><p>Indice de fiabilité affiché jusqu’à 88/100 — validation IA Groq sur 17 sources françaises, avec filtrage des anomalies.</p></details>
-          <details><summary>Compatible WooCommerce / PrestaShop&nbsp;?</summary><p>Oui — export CSV en un clic (WooCommerce et PrestaShop supportés côté fichiers standards).</p></details>
-          <details><summary>Puis-je annuler à tout moment&nbsp;?</summary><p>Oui — sans engagement sur l’offre mensuelle, résiliation à tout moment depuis votre espace.</p></details>
-          <details><summary>Combien de modèles sont suivis&nbsp;?</summary><p>148 modèles couvrant 10 marques majeures sur le marché français.</p></details>
-        </div>
+      <div class="pr-bar"></div>
+      <div class="pr-brands">
+        <span class="pr-brand">Nike</span>
+        <span class="pr-brand">Adidas</span>
+        <span class="pr-brand">New Balance</span>
+        <span class="pr-brand">Salomon</span>
+        <span class="pr-brand">Converse</span>
+        <span class="pr-brand">Vans</span>
+        <span class="pr-brand">Asics</span>
+        <span class="pr-brand">Reebok</span>
+        <span class="pr-brand">Puma</span>
+        <span class="pr-brand">On Running</span>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="wrap">
-      <div class="cta-final reveal">
-        <h2>Prêt à optimiser vos prix&nbsp;?</h2>
-        <p class="sub">5 essais gratuits • Sans carte bancaire</p>
-        <a class="btn btn-primary btn-lg" href="/subscribe">Commencer gratuitement</a>
+  <!-- ── Comment ça marche ──────────────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-header">
+      <span class="sec-icon">⚡</span>
+      <h2>Comment ça marche</h2>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <b>Choisissez un modèle</b>
+        <span>Nike, Adidas, New Balance, Salomon…</span>
       </div>
-    </section>
-  </main>
+      <div class="step">
+        <b>On analyse les prix</b>
+        <span>{{ shop_count }}+ boutiques comparées automatiquement.</span>
+      </div>
+      <div class="step">
+        <b>Comparez en un coup d'œil</b>
+        <span>Vue claire, min/max/moy sur une seule page.</span>
+      </div>
+      <div class="step">
+        <b>Achetez au bon moment</b>
+        <span>Saisissez la meilleure offre disponible.</span>
+      </div>
+    </div>
+  </section>
 
-  <footer>
-    <div class="wrap">
-      <p>© 2026 PrixDesBaskets</p>
-      <p>Site : <a href="https://sneakerbot.shop">sneakerbot.shop</a></p>
-      <p><a href="/mentions-legales">Mentions légales</a> · <a href="/login">Connexion</a></p>
+  <!-- ── Ce que vous obtenez ────────────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-header">
+      <span class="sec-icon">✅</span>
+      <h2>Ce que vous obtenez</h2>
+    </div>
+    <div class="benefit-grid">
+      <div class="benefit">
+        <div class="benefit-icon">📉</div>
+        <b>Prix minimum garanti</b>
+        <span>Repérez l'offre la plus basse disponible en temps réel.</span>
+      </div>
+      <div class="benefit">
+        <div class="benefit-icon">📊</div>
+        <b>Prix moyen du marché</b>
+        <span>Visualisez le juste prix pour chaque modèle.</span>
+      </div>
+      <div class="benefit">
+        <div class="benefit-icon">🔍</div>
+        <b>Sources multiples</b>
+        <span>Zalando, Foot Locker, Intersport, Spartoo et plus.</span>
+      </div>
+      <div class="benefit">
+        <div class="benefit-icon">📡</div>
+        <b>Tendances marché</b>
+        <span>Identifiez le bon moment pour acheter.</span>
+      </div>
+    </div>
+    <div style="margin-top:22px;text-align:center">
+      <a class="btn btn-main" href="{{ cta_primary }}">Accéder au comparateur</a>
+    </div>
+  </section>
+
+  <!-- ── Social proof ───────────────────────────────────────────────────── -->
+  <section class="sec">
+    <div class="sec-header">
+      <span class="sec-icon">💬</span>
+      <h2>Ils ont comparé avant d'acheter</h2>
+    </div>
+    <div class="pills">
+      <span class="pill">✔ Données mises à jour automatiquement</span>
+      <span class="pill">✔ Prix analysés en quelques secondes</span>
+      <span class="pill">✔ Plateforme 100% sneakers</span>
+      <span class="pill">✔ {{ reliability_pct }}% de fiabilité des données</span>
+    </div>
+    <div class="testimonial">
+      <div class="stars">⭐⭐⭐⭐⭐</div>
+      <div id="testimonial-quote" class="t-quote">"J'ai économisé 42€ sur mes Nike en 2 minutes. Je n'achète plus sans vérifier ici."</div>
+      <div class="t-author" id="testimonial-author">— Thomas R., Paris</div>
+    </div>
+  </section>
+
+  <!-- ── CTA final ─────────────────────────────────────────────────────── -->
+  <section class="cta-final">
+    <h2>Ne payez plus au hasard.</h2>
+    <p>Rejoignez les acheteurs qui comparent avant d'acheter. Accès immédiat, sans engagement.</p>
+    <div class="cta-row">
+      <a class="btn btn-main" href="{{ cta_final }}">
+        Essayer gratuitement →
+      </a>
+    </div>
+    <p class="cta-hint" style="margin-top:12px">⚡ Aucune carte requise</p>
+  </section>
+
+  <!-- ── Footer ─────────────────────────────────────────────────────────── -->
+  <footer class="foot">
+    <div>Sneakerbot.shop — Le radar prix des sneakers.</div>
+    <div>Comparer vite. Acheter mieux.</div>
+    <div class="seo-links">
+      <a href="/comparison">Comparateur FR</a>
+      <a href="/product/nike-air-force-1">Nike Air Force 1</a>
+      <a href="/product/adidas-samba">Adidas Samba</a>
+      <a href="/product/new-balance-530">New Balance 530</a>
+      <a href="/blog/meilleures-sneakers-2026">Blog 2026</a>
     </div>
   </footer>
 
-  <script>
-    (function () {
-      var nodes = document.querySelectorAll('.reveal');
-      if (!('IntersectionObserver' in window)) {
-        nodes.forEach(function (n) { n.classList.add('visible'); });
-      } else {
-        var io = new IntersectionObserver(function (entries) {
-          entries.forEach(function (e) {
-            if (e.isIntersecting) {
-              e.target.classList.add('visible');
-              io.unobserve(e.target);
-            }
-          });
-        }, { rootMargin: '0px 0px -40px 0px', threshold: 0.08 });
-        nodes.forEach(function (n) { io.observe(n); });
-      }
+</div><!-- /wrap -->
 
-      function setText(id, txt) {
-        var el = document.getElementById(id);
-        if (el) el.textContent = txt;
-      }
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "Sneakerbot.shop",
+  "url": "https://sneakerbot.shop/",
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": "https://sneakerbot.shop/search?brand={brand}&model={model}",
+    "query-input": "required name=brand"
+  }
+}
+</script>
+<script>
+(function () {
+  "use strict";
 
-      fetch('/api/public/landing-stats', { cache: 'no-store' })
-        .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
-        .then(function (d) {
-          var mc = d.models_count != null ? d.models_count : 148;
-          var sc = d.sources_count != null ? d.sources_count : 17;
-          var avg = d.avg_price_eur != null ? d.avg_price_eur : 117;
-          var maj = d.last_updated || '—';
-          setText('st-models', String(mc));
-          setText('st-sources', String(sc));
-          setText('st-avg', Math.round(avg) + '\u00a0€');
-          setText('st-maj', maj || '—');
-          var line = mc + ' modèles • ' + sc + ' sources • Mis à jour toutes les 5h';
-          setText('hero-stats-line', line);
-        })
-        .catch(function () {
-          setText('st-models', '148');
-          setText('st-sources', '17');
-          setText('st-avg', '117€');
-          setText('st-maj', '—');
-        });
-    })();
-  </script>
+  /* ── Live update display ─────────────────────────────────────────────── */
+  var updateVal = document.getElementById("js-update-val");
+  var updateSub = document.getElementById("js-update-sub");
+  if (updateVal && updateSub) {
+    var raw = updateSub.textContent.trim();
+    // raw is already formatted server-side (e.g. "il y a 12 min")
+    if (raw && raw !== "—") {
+      updateVal.textContent = raw.replace("il y a ", "").replace(" min", "m").replace("h", "h");
+      if (raw.indexOf("min") !== -1) {
+        var m = raw.match(/\d+/);
+        if (m) { updateVal.textContent = m[0] + "min"; }
+      }
+    } else {
+      updateVal.textContent = "<40m";
+    }
+  }
+
+  /* ── Average price from health endpoint (optional enrichment) ─────────── */
+  fetch("/health", { signal: AbortSignal.timeout ? AbortSignal.timeout(3000) : undefined })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (h) {
+      if (!h) return;
+      // Try to show last update age more precisely
+      var fr = ((h.data_freshness || {}).market_fr_csv || {});
+      var age = fr.age_minutes;
+      if (typeof age === "number") {
+        var a = Math.round(age);
+        if (updateVal) updateVal.textContent = a < 60 ? a + "min" : Math.floor(a / 60) + "h";
+        if (updateSub) updateSub.textContent = a < 60 ? "il y a " + a + " min" : "il y a " + Math.floor(a / 60) + "h";
+      }
+    })
+    .catch(function () {});
+
+  /* ── Testimonial carousel ────────────────────────────────────────────── */
+  var quoteEl   = document.getElementById("testimonial-quote");
+  var authorEl  = document.getElementById("testimonial-author");
+  var testimonials = [
+    { q: "\u201cJ\u2019ai \u00e9conomis\u00e9 42\u20ac sur mes Nike en 2 minutes. Je n\u2019ach\u00e8te plus sans v\u00e9rifier ici.\u201d", a: "\u2014 Thomas R., Paris" },
+    { q: "\u201cEnfin un comparateur sneakers vraiment utile. Simple et rapide.\u201d",                                                    a: "\u2014 Maxime D., Lyon" },
+    { q: "\u201cJ\u2019ai trouv\u00e9 les New Balance 550 moins cher de 35\u20ac en 30 secondes.\u201d",                                  a: "\u2014 Sarah K., Bordeaux" },
+    { q: "\u201cJe consulte Sneakerbot avant chaque achat. R\u00e9flexe indispensable.\u201d",                                            a: "\u2014 Lucas M., Lille" }
+  ];
+  var tidx = 0;
+  if (quoteEl && authorEl) {
+    setInterval(function () {
+      tidx = (tidx + 1) % testimonials.length;
+      quoteEl.style.opacity = "0";
+      authorEl.style.opacity = "0";
+      setTimeout(function () {
+        quoteEl.textContent  = testimonials[tidx].q;
+        authorEl.textContent = testimonials[tidx].a;
+        quoteEl.style.opacity  = "1";
+        authorEl.style.opacity = "1";
+      }, 300);
+    }, 4500);
+  }
+})();
+</script>
 </body>
 </html>

@@ -932,8 +932,16 @@ async def auth_gate_middleware(request: Request, call_next):
             return JSONResponse({"detail": "IP bannie temporairement"}, status_code=403)
 
         path = request.url.path or "/"
+        # Exemption : endpoints Mission Control admin → bypass compteurs rate-limit.
+        # Un admin authentifié qui charge son cockpit ne doit jamais être throttlé.
+        _mission_admin_exempt = (
+            path.startswith("/api/mission/") or path == "/mission-control"
+        ) and _is_admin_session(request)
+
         # Limiter la détection flood aux endpoints les plus sensibles.
-        if path.startswith("/api/") or (path == "/login" and request.method.upper() == "POST"):
+        if not _mission_admin_exempt and (
+            path.startswith("/api/") or (path == "/login" and request.method.upper() == "POST")
+        ):
             if _record_hit_and_detect_flood(ip):
                 _ban_ip(ip, "flood_rate_limit")
                 return JSONResponse({"detail": "IP bannie pour trafic suspect"}, status_code=403)
@@ -951,9 +959,13 @@ async def auth_gate_middleware(request: Request, call_next):
         elif _is_authenticated(request):
             response = await call_next(request)
         elif path.startswith("/api/"):
-            if _record_unauth_and_detect(ip):
+            # Mission Control : renvoyer 401 JSON propre sans compter dans le rate-limiter unauth.
+            if path.startswith("/api/mission/"):
+                response = JSONResponse({"detail": "Authentification requise", "redirect": "/login"}, status_code=401)
+            elif _record_unauth_and_detect(ip):
                 return JSONResponse({"detail": "Trop de requetes non authentifiees"}, status_code=429)
-            response = JSONResponse({"detail": "Authentification requise"}, status_code=401)
+            else:
+                response = JSONResponse({"detail": "Authentification requise"}, status_code=401)
         else:
             next_q = quote(path, safe="/?=&")
             response = RedirectResponse(url=f"/login?next={next_q}", status_code=307)
@@ -2671,7 +2683,7 @@ async def login_submit(
                 "error": "Identifiants invalides.",
                 "sales_closed": sales_closed,
             },
-            status_code=200,
+            status_code=401,
         )
 
     role = str(user.get("role") or "client").strip().lower()
@@ -3565,6 +3577,19 @@ def _api_comparison_fr_impl(
             _agg["tier_badge"] = _tbl(_item_brand, _item_model, int(_agg.get("confidence_score") or 0))
         except Exception:
             _agg["tier_badge"] = "BRONZE"
+        # ── Trust Engine : prix fiables + explainability ───────────────────
+        try:
+            from app.trust_engine import build_trust_report as _btr
+            _agg["trust_report"] = _btr(
+                brand=_item_brand,
+                model=_item_model,
+                sources=_shop_items,
+                market_meta={
+                    "confidence_score": _agg.get("confidence_score") or 0,
+                },
+            )
+        except Exception:
+            _agg["trust_report"] = None
         agg_items.append(_agg)
         # Deadline souple : si > 1.8 s, on arrête la boucle et on retourne ce qu'on a.
         # Évite le 502 sous charge (requêtes concurrentes, CSV gros).
@@ -3762,6 +3787,69 @@ def api_sneakers_search(q: str = Query("")):
             or ql in str(i.get("model") or "").lower()
         ]
     return {"items": items, "count": len(items)}
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SPARKLINE ENDPOINTS — historique prix par modèle (lecture seule)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/sneakers/{model_id:path}/history")
+def api_sneaker_history(
+    model_id: str,
+    request: Request,
+    days: int = Query(30, ge=1, le=365),
+):
+    """
+    Historique des prix 30j pour un modèle (brand|model).
+    Utilisé par les sparklines de la page comparison.
+    """
+    if not _is_authenticated(request):
+        return JSONResponse({"detail": "Authentification requise"}, status_code=401)
+    try:
+        parts = model_id.split("|", 1)
+        if len(parts) != 2:
+            return JSONResponse({"history": [], "brand": "", "model": model_id})
+        brand, model = parts[0].strip(), parts[1].strip()
+        from app.price_history import get_history as _get_history
+        rows = _get_history(brand=brand, model=model, days=days, market="FR")
+        return JSONResponse({"history": rows, "brand": brand, "model": model, "days": days})
+    except Exception as exc:
+        logger.warning("api_sneaker_history error: %s", exc)
+        return JSONResponse({"history": [], "brand": "", "model": ""})
+
+
+@app.get("/api/sneakers/{model_id:path}/trend")
+def api_sneaker_trend(model_id: str, request: Request):
+    """
+    Tendance prix 30j pour un modèle (brand|model).
+    Utilisé par le modal historique de la page comparison.
+    """
+    if not _is_authenticated(request):
+        return JSONResponse({"detail": "Authentification requise"}, status_code=401)
+    try:
+        parts = model_id.split("|", 1)
+        if len(parts) != 2:
+            return JSONResponse({"trend": None, "change_pct": 0})
+        brand, model = parts[0].strip(), parts[1].strip()
+        from app.price_history import get_history as _get_history
+        rows = _get_history(brand=brand, model=model, days=30, market="FR")
+        if len(rows) < 2:
+            return JSONResponse({"trend": "stable", "change_pct": 0, "nb_snapshots": len(rows), "history": rows})
+        prices = [float(r["price_avg"]) for r in rows]
+        first, last = prices[0], prices[-1]
+        chg = round((last - first) / first * 100, 1) if first else 0
+        trend = "hausse" if chg > 1 else ("baisse" if chg < -1 else "stable")
+        return JSONResponse({
+            "trend":        trend,
+            "change_pct":   chg,
+            "nb_snapshots": len(rows),
+            "min_30d":      round(min(prices), 2),
+            "max_30d":      round(max(prices), 2),
+            "history":      rows,
+        })
+    except Exception as exc:
+        logger.warning("api_sneaker_trend error: %s", exc)
+        return JSONResponse({"trend": "stable", "change_pct": 0})
 
 
 @app.get("/api/quality/fr")

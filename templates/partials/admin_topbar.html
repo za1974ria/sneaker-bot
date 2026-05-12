@@ -1,0 +1,11 @@
+{# Barre navigation admin (identique à l’ancien _ADMIN_TOPBAR inline) #}
+<div style="background:#0f1a13;border-bottom:1px solid #14532d;padding:8px 20px;display:flex;gap:12px;align-items:center;font-size:.8rem;font-family:system-ui">
+  <span style="color:#4dff9f;font-weight:800;margin-right:8px">⚡ ADMIN</span>
+  <a href="/admin" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">🏠 Dashboard</a>
+  <a href="/comparison" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">🔍 Comparateur</a>
+  <a href="/analytics" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">📊 Analytics</a>
+  <a href="/supervisor" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">🤖 AEGIS</a>
+  <a href="/admin/visitors" style="color:{% if request.url.path.startswith('/admin/visitors') %}#4dff9f{% else %}#9ca3af{% endif %};text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid {% if request.url.path.startswith('/admin/visitors') %}#166534{% else %}#1f2937{% endif %};background:{% if request.url.path.startswith('/admin/visitors') %}#0f2f1f{% else %}transparent{% endif %}">👁️ Visiteurs</a>
+  <a href="/admin/subscriptions" style="color:#9ca3af;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #1f2937">👥 Abonnements</a>
+  <a href="/logout" style="color:#ef4444;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid #3f1515;margin-left:auto">Déconnexion</a>
+</div>

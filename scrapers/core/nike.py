@@ -7,6 +7,7 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 
+from scrapers.utils.fetch_retry import fetch_with_retry
 from scrapers.utils.normalize import clean_text, parse_price_to_eur
 
 NIKE_SEARCH_URL = "https://www.nike.com/fr/w/chaussures-y7ok"
@@ -66,8 +67,17 @@ def scrape_nike() -> list[dict[str, Any]]:
             "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         )
     }
+    sess = requests.Session()
+    resp = fetch_with_retry(
+        sess,
+        NIKE_SEARCH_URL,
+        timeout=float(REQUEST_TIMEOUT_S),
+        attempts=3,
+        headers=headers,
+    )
+    if resp is None:
+        return []
     try:
-        resp = requests.get(NIKE_SEARCH_URL, headers=headers, timeout=REQUEST_TIMEOUT_S)
         resp.raise_for_status()
     except requests.RequestException:
         return []

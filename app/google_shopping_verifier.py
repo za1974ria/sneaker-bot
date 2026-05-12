@@ -13,17 +13,62 @@ import random
 import re
 import sqlite3
 import time
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-import requests
+
+from scrapers.utils.fetch_retry import fetch_url_get
 
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = _PROJECT_ROOT / "data" / "google_shopping_cache.db"
 MARKET_FR_CSV = _PROJECT_ROOT / "data" / "market_fr.csv"
+
+_SERP_CB_LOCK = threading.Lock()
+_google_cache_init_done = False
+_google_cache_init_lock = threading.Lock()
+_SERP_CB_FAILS = 0
+_SERP_CB_OPEN_UNTIL = 0.0
+_SERP_CB_LAST_ERROR = ""
+
+
+def _serp_circuit_is_open() -> bool:
+    now = time.time()
+    with _SERP_CB_LOCK:
+        return _SERP_CB_OPEN_UNTIL > now
+
+
+def _serp_circuit_on_success() -> None:
+    global _SERP_CB_FAILS, _SERP_CB_OPEN_UNTIL, _SERP_CB_LAST_ERROR
+    with _SERP_CB_LOCK:
+        _SERP_CB_FAILS = 0
+        _SERP_CB_OPEN_UNTIL = 0.0
+        _SERP_CB_LAST_ERROR = ""
+
+
+def _serp_circuit_on_failure(err: str) -> None:
+    global _SERP_CB_FAILS, _SERP_CB_OPEN_UNTIL, _SERP_CB_LAST_ERROR
+    with _SERP_CB_LOCK:
+        _SERP_CB_FAILS += 1
+        _SERP_CB_LAST_ERROR = str(err or "")[:180]
+        # Ouvre le circuit pendant 5 min après 3 échecs consécutifs.
+        if _SERP_CB_FAILS >= 3:
+            _SERP_CB_OPEN_UNTIL = time.time() + 300.0
+            logger.warning("[SERP CB] open for 300s after failures=%d", _SERP_CB_FAILS)
+
+
+def get_serpapi_runtime_status() -> dict[str, Any]:
+    with _SERP_CB_LOCK:
+        open_for = max(0, int(_SERP_CB_OPEN_UNTIL - time.time()))
+        return {
+            "circuit_open": _SERP_CB_OPEN_UNTIL > time.time(),
+            "open_for_sec": open_for,
+            "consecutive_failures": int(_SERP_CB_FAILS),
+            "last_error": str(_SERP_CB_LAST_ERROR),
+        }
 
 
 @contextmanager
@@ -43,42 +88,63 @@ def _db():
 
 
 def init_google_cache() -> None:
-    with _db() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS google_prices (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                brand        TEXT NOT NULL,
-                model        TEXT NOT NULL,
-                google_price REAL,
-                google_min   REAL,
-                google_max   REAL,
-                nb_results   INTEGER DEFAULT 0,
-                status       TEXT DEFAULT 'ok',
-                fetched_at   TEXT NOT NULL,
-                UNIQUE(brand, model)
+    global _google_cache_init_done
+    if _google_cache_init_done:
+        return
+    with _google_cache_init_lock:
+        if _google_cache_init_done:
+            return
+        with _db() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS google_prices (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    brand        TEXT NOT NULL,
+                    model        TEXT NOT NULL,
+                    google_price REAL,
+                    google_min   REAL,
+                    google_max   REAL,
+                    nb_results   INTEGER DEFAULT 0,
+                    status       TEXT DEFAULT 'ok',
+                    fetched_at   TEXT NOT NULL,
+                    UNIQUE(brand, model)
+                )
+                """
             )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS google_verifications (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                brand        TEXT NOT NULL,
-                model        TEXT NOT NULL,
-                our_price    REAL NOT NULL,
-                google_price REAL,
-                deviation_pct REAL,
-                verdict      TEXT NOT NULL,
-                verified_at  TEXT NOT NULL
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS google_verifications (
+                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                    brand        TEXT NOT NULL,
+                    model        TEXT NOT NULL,
+                    our_price    REAL NOT NULL,
+                    google_price REAL,
+                    deviation_pct REAL,
+                    verdict      TEXT NOT NULL,
+                    verified_at  TEXT NOT NULL
+                )
+                """
             )
-            """
-        )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS google_shop_prices (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    brand      TEXT NOT NULL,
+                    model      TEXT NOT NULL,
+                    shop       TEXT NOT NULL,
+                    price      REAL NOT NULL,
+                    link       TEXT,
+                    fetched_at TEXT NOT NULL,
+                    UNIQUE(brand, model, shop)
+                )
+                """
+            )
+        _google_cache_init_done = True
 
 
 def _get_cached_price(brand: str, model: str) -> dict[str, Any] | None:
     """Retourne le prix en cache si < 24h."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     with _db() as conn:
         row = conn.execute(
             """
@@ -88,6 +154,68 @@ def _get_cached_price(brand: str, model: str) -> dict[str, Any] | None:
             (brand, model, cutoff),
         ).fetchone()
     return dict(row) if row else None
+
+
+def _is_price_cache_fresh(brand: str, model: str, *, ttl_minutes: int) -> bool:
+    """True si la ligne google_prices est plus récente que ttl_minutes."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max(1, int(ttl_minutes)))).isoformat()
+    with _db() as conn:
+        row = conn.execute(
+            """
+            SELECT 1 FROM google_prices
+            WHERE brand=? AND model=? AND fetched_at > ?
+            LIMIT 1
+            """,
+            (brand, model, cutoff),
+        ).fetchone()
+    return bool(row)
+
+
+def is_shops_cache_fresh(brand: str, model: str, *, ttl_hours: int = 168) -> bool:
+    """
+    True si google_shop_prices contient des données < ttl_hours pour ce modèle.
+    Défaut 168h (7 jours) — cohérent avec la politique cache de get_all_shops_prices.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=max(1, int(ttl_hours)))).isoformat()
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM google_shop_prices WHERE brand=? AND model=? AND fetched_at > ? LIMIT 1",
+                (brand, model, cutoff),
+            ).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def read_serpapi_budget_mode() -> str:
+    """
+    Retourne le mode budget SerpAPI courant.
+    PA3 : délègue au compteur réel serpapi_budget.py.
+    """
+    try:
+        from app.serpapi_budget import get_budget_mode
+        return get_budget_mode()
+    except Exception:
+        pass
+    # Fallback : override manuel uniquement
+    env_mode = os.getenv("SERPAPI_BUDGET_MODE", "").strip().lower()
+    return env_mode if env_mode in ("normal", "prudent", "essential", "stop") else "normal"
+
+
+def get_last_google_sync_meta() -> dict[str, Any]:
+    """Expose la dernière synchro Google/SerpAPI connue."""
+    with _db() as conn:
+        row = conn.execute(
+            """
+            SELECT fetched_at
+            FROM google_prices
+            ORDER BY fetched_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    fetched_at = str(row["fetched_at"]) if row and row["fetched_at"] else ""
+    return {"last_run": fetched_at}
 
 
 def get_cached_google_price(brand: str, model: str) -> dict[str, Any] | None:
@@ -128,13 +256,121 @@ def _save_cached_price(
         )
 
 
-def scrape_google_shopping_price(brand: str, model: str) -> dict[str, Any]:
+def get_all_shops_prices(brand: str, model: str, *, force: bool = False) -> list[dict[str, Any]]:
+    """
+    Retourne toutes les boutiques Google Shopping pour brand+model.
+    Format : [{'shop': 'Courir', 'price': 89.99, 'title': '...', 'link': '...'}]
+    Cache SQLite 24 h. Agrège par boutique (prix minimum retenu).
+    """
+    init_google_cache()
+    brand = (brand or "").strip()
+    model = (model or "").strip()
+    if not brand or not model:
+        return []
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    if not force:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT shop, price, link FROM google_shop_prices "
+                "WHERE brand=? AND model=? AND fetched_at > ?",
+                (brand, model, cutoff),
+            ).fetchall()
+        if rows:
+            return [{"shop": r["shop"], "price": r["price"], "title": "", "link": r["link"] or ""} for r in rows]
+
+    api_key = os.getenv("SERPAPI_KEY", "").strip()
+    if not api_key:
+        logger.warning("get_all_shops_prices: SERPAPI_KEY manquant")
+        return []
+    if _serp_circuit_is_open():
+        logger.warning("[SERP SYNC] circuit breaker open -> fallback local shops cache")
+        return []
+
+    # Deux requêtes pour maximiser la couverture boutiques
+    queries = [f"{brand} {model}", model]
+    shop_prices: dict[str, float] = {}
+    shop_links: dict[str, str] = {}
+    shop_titles: dict[str, str] = {}
+
+    for q in queries:
+        try:
+            # PA3 : compteur réel avant chaque appel HTTP SerpAPI
+            try:
+                from app.serpapi_budget import increment_call_count as _inc
+                _inc(1)
+            except Exception:
+                pass
+            r = fetch_url_get(
+                "https://serpapi.com/search",
+                params={
+                    "engine": "google_shopping",
+                    "tbm": "shop",
+                    "q": q,
+                    "gl": "fr",
+                    "hl": "fr",
+                    "num": 40,
+                    "api_key": api_key,
+                },
+                timeout=15.0,
+                attempts=3,
+            )
+            if r is None:
+                continue
+            results = r.json().get("shopping_results", [])
+            for item in results:
+                shop = (item.get("source") or "").strip()
+                price = item.get("extracted_price")
+                link = item.get("product_link") or item.get("link") or ""
+                title = (item.get("title") or "").strip()
+                if not shop or not price:
+                    continue
+                try:
+                    price = round(float(price), 2)
+                except (TypeError, ValueError):
+                    continue
+                if price < 20 or price > 2000:
+                    continue
+                # Garder le prix minimum par boutique
+                if shop not in shop_prices or price < shop_prices[shop]:
+                    shop_prices[shop] = price
+                    shop_links[shop] = link
+                    shop_titles[shop] = title
+        except Exception as e:  # noqa: BLE001
+            logger.debug("get_all_shops_prices SerpAPI error q=%r: %s", q, e)
+            _serp_circuit_on_failure(str(e))
+
+    if not shop_prices:
+        return []
+    _serp_circuit_on_success()
+
+    now = datetime.now(timezone.utc).isoformat()
+    with _db() as conn:
+        for shop, price in shop_prices.items():
+            conn.execute(
+                "INSERT OR REPLACE INTO google_shop_prices "
+                "(brand, model, shop, price, link, fetched_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (brand, model, shop, price, shop_links.get(shop, ""), now),
+            )
+
+    logger.info("get_all_shops_prices %s %s: %d boutiques", brand, model, len(shop_prices))
+    return [{"shop": shop, "price": price, "title": shop_titles.get(shop, ""), "link": shop_links.get(shop, "")}
+            for shop, price in sorted(shop_prices.items(), key=lambda x: x[1])]
+
+
+def scrape_google_shopping_price(
+    brand: str,
+    model: str,
+    *,
+    force_refresh: bool = False,
+    ttl_minutes: int = 7 * 24 * 60,
+) -> dict[str, Any]:
     """
     Récupère les prix Google Shopping via SerpAPI.
     Cache SQLite 24h pour économiser les crédits.
     """
     cached = _get_cached_price(brand, model)
-    if cached:
+    if cached and not force_refresh and _is_price_cache_fresh(brand, model, ttl_minutes=ttl_minutes):
         logger.debug("Cache hit: %s %s", brand, model)
         return {
             "google_price": cached["google_price"],
@@ -153,18 +389,44 @@ def scrape_google_shopping_price(brand: str, model: str) -> dict[str, Any]:
             "nb_results": 0,
             "status": "no_api_key",
         }
+    if _serp_circuit_is_open():
+        logger.warning("[SERP SYNC] circuit breaker open -> skip external call %s %s", brand, model)
+        return {
+            "google_price": None,
+            "google_min": None,
+            "google_max": None,
+            "nb_results": 0,
+            "status": "circuit_open",
+        }
 
     try:
         params = {
             "engine": "google_shopping",
+            "tbm": "shop",
             "q": f"{brand} {model}",
             "gl": "fr",
             "hl": "fr",
             "currency": "EUR",
             "api_key": api_key,
         }
-        r = requests.get("https://serpapi.com/search", params=params, timeout=15)
+        # PA3 : compteur réel avant appel HTTP SerpAPI (scrape_google_shopping_price)
+        try:
+            from app.serpapi_budget import increment_call_count as _inc
+            _inc(1)
+        except Exception:
+            pass
+        r = fetch_url_get("https://serpapi.com/search", params=params, timeout=15.0, attempts=3)
+        if r is None:
+            _serp_circuit_on_failure("request_failed")
+            return {
+                "google_price": None,
+                "google_min": None,
+                "google_max": None,
+                "nb_results": 0,
+                "status": "request_failed",
+            }
         data = r.json()
+        _serp_circuit_on_success()
 
         if "shopping_results" not in data:
             logger.warning("SerpAPI: pas de résultats pour %s %s", brand, model)
@@ -228,6 +490,7 @@ def scrape_google_shopping_price(brand: str, model: str) -> dict[str, Any]:
 
     except Exception as e:  # noqa: BLE001
         logger.error("SerpAPI erreur %s %s: %s", brand, model, e)
+        _serp_circuit_on_failure(str(e))
         return {
             "google_price": None,
             "google_min": None,
@@ -235,6 +498,62 @@ def scrape_google_shopping_price(brand: str, model: str) -> dict[str, Any]:
             "nb_results": 0,
             "status": f"error: {str(e)[:50]}",
         }
+
+
+def refresh_google_models(
+    models: list[tuple[str, str]],
+    *,
+    ttl_minutes: int = 1440,    # PA1 : 24h (était 120 min → ×12 du quota)
+    max_products: int = 32,
+    budget_mode: str = "normal",
+) -> dict[str, Any]:
+    """
+    Refresh intelligent d'une liste priorisée de modèles.
+    - saute les entrées encore fraîches (< ttl_minutes, défaut 24h)
+    - respecte max_products
+    - mode budget: limite renforcée côté appelant
+    """
+    processed = 0
+    refreshed = 0
+    skipped_cache = 0
+    errors = 0
+    seen: set[tuple[str, str]] = set()
+
+    for brand, model in models:
+        b = (brand or "").strip()
+        m = (model or "").strip()
+        if not b or not m:
+            continue
+        key = (b.lower(), m.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        if processed >= max_products:
+            break
+        processed += 1
+
+        try:
+            if _is_price_cache_fresh(b, m, ttl_minutes=ttl_minutes):
+                skipped_cache += 1
+                logger.info("[SERP SYNC] skipped cache active %s %s", b, m)
+                continue
+            rep = scrape_google_shopping_price(b, m, force_refresh=True, ttl_minutes=ttl_minutes)
+            if str(rep.get("status", "")).startswith("error"):
+                errors += 1
+            else:
+                refreshed += 1
+        except Exception as exc:  # noqa: BLE001
+            errors += 1
+            logger.warning("[SERP SYNC] refresh error %s %s: %s", b, m, exc)
+
+    return {
+        "processed": processed,
+        "refreshed": refreshed,
+        "skipped_cache": skipped_cache,
+        "errors": errors,
+        "budget_mode": budget_mode,
+        "run_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def verify_against_google(brand: str, model: str, our_price: float) -> dict[str, Any]:

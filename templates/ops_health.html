@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Ops Health — Sneakerbot</title>
+  <style>
+    :root{--bg:#0a0d0b;--card:#111714;--txt:#eef2ef;--muted:#8f9a94;--accent:#00ff88;--border:#1f2c26}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--txt);font-family:Inter,system-ui,Arial,sans-serif}
+    .wrap{max-width:980px;margin:0 auto;padding:22px 16px 44px}
+    .head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+    .title{font-size:1.2rem;font-weight:800}
+    .muted{color:var(--muted);font-size:.9rem}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:14px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
+    .v{font-size:1.45rem;font-weight:900;color:var(--accent)}
+    .k{font-size:.76rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em}
+    .status{margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px}
+    .list{margin:0;padding-left:18px}
+    .list li{margin:4px 0;color:#c9d1cc}
+    .table{margin-top:14px;background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:auto}
+    table{width:100%;border-collapse:collapse;min-width:620px}
+    th,td{padding:8px 10px;border-bottom:1px solid #1a241f;font-size:.86rem;text-align:left}
+    th{color:#9fb1a7;font-size:.72rem;text-transform:uppercase;letter-spacing:.08em}
+    .ok{color:#86efac}.warn{color:#fbbf24}.bad{color:#f87171}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="head">
+      <div>
+        <div class="title">Ops Health 24h</div>
+        <div class="muted">Lecture seule — mise à jour toutes les 30s</div>
+      </div>
+      <a href="/admin" class="muted" style="text-decoration:none">Retour admin</a>
+    </div>
+
+    <section class="grid">
+      <article class="card"><div class="k">Score actuel</div><div id="sNow" class="v">--</div></article>
+      <article class="card"><div class="k">Score moyen 24h</div><div id="sAvg" class="v">--</div></article>
+      <article class="card"><div class="k">SerpApi</div><div id="sSerp" class="v" style="font-size:1rem">--</div></article>
+      <article class="card"><div class="k">Backend</div><div id="sBack" class="v" style="font-size:1rem">--</div></article>
+    </section>
+
+    <section class="status">
+      <div class="k" style="margin-bottom:8px">Warnings</div>
+      <ul id="warns" class="list"><li class="muted">Aucun warning</li></ul>
+    </section>
+
+    <section class="table">
+      <table>
+        <thead><tr><th>Timestamp</th><th>Score</th><th>SerpApi</th><th>Backend</th><th>Warnings</th></tr></thead>
+        <tbody id="hist"><tr><td colspan="5" class="muted">Chargement…</td></tr></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    async function refreshOps() {
+      try {
+        const [auditRes, histRes] = await Promise.all([
+          fetch('/api/system_audit', { cache: 'no-store' }),
+          fetch('/api/ops-health/history', { cache: 'no-store' })
+        ]);
+        if (!auditRes.ok || !histRes.ok) throw new Error('ops');
+        const audit = await auditRes.json();
+        const hist = await histRes.json();
+
+        document.getElementById('sNow').textContent = String(audit.health_score ?? '--');
+        document.getElementById('sAvg').textContent = String(hist.avg_health_score_24h ?? '--');
+        document.getElementById('sSerp').textContent = String(audit.serpapi_status || '--');
+        document.getElementById('sBack').textContent = String(audit.backend_status || '--');
+
+        const warns = Array.isArray(audit.warnings) ? audit.warnings : [];
+        document.getElementById('warns').innerHTML = warns.length
+          ? warns.map(w => `<li>${w}</li>`).join('')
+          : '<li class="muted">Aucun warning</li>';
+
+        const items = Array.isArray(hist.items) ? hist.items.slice().reverse() : [];
+        document.getElementById('hist').innerHTML = items.length
+          ? items.map(it => `<tr>
+              <td>${it.ts || ''}</td>
+              <td>${it.health_score ?? ''}</td>
+              <td class="${it.serpapi_status === 'ok' ? 'ok' : 'warn'}">${it.serpapi_status || ''}</td>
+              <td class="${it.backend_status === 'ok' ? 'ok' : 'warn'}">${it.backend_status || ''}</td>
+              <td>${it.warnings_count ?? 0}</td>
+            </tr>`).join('')
+          : '<tr><td colspan="5" class="muted">Aucune donnée 24h</td></tr>';
+      } catch (e) {
+        document.getElementById('hist').innerHTML = '<tr><td colspan="5" class="warn">Erreur chargement ops</td></tr>';
+      }
+    }
+    refreshOps();
+    setInterval(refreshOps, 30000);
+  </script>
+</body>
+</html>

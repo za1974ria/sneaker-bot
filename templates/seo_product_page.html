@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ title }}</title>
+  <meta name="description" content="{{ description }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta property="og:type" content="product">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:url" content="{{ canonical_url }}">
+  <meta property="og:image" content="https://sneakerbot.shop/static/favicon.svg">
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"Product",
+    "name":"{{ brand }} {{ model }}",
+    "brand":"{{ brand }}",
+    "offers":{
+      "@type":"AggregateOffer",
+      "priceCurrency":"EUR",
+      "lowPrice":"{{ '%.2f'|format(price_min) }}",
+      "highPrice":"{{ '%.2f'|format(price_max) }}"
+    }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"FAQPage",
+    "mainEntity":[
+      {"@type":"Question","name":"Comment lire les prix {{ brand }} {{ model }} ?","acceptedAnswer":{"@type":"Answer","text":"Sneakerbot agrège plusieurs boutiques FR puis calcule min, max et prix moyen."}},
+      {"@type":"Question","name":"Quand acheter {{ brand }} {{ model }} ?","acceptedAnswer":{"@type":"Answer","text":"Privilégiez les périodes où l'écart min/moyen baisse et où la tendance se stabilise."}}
+    ]
+  }
+  </script>
+  <style>
+    body{margin:0;background:#0b0d0c;color:#eef2ef;font-family:Inter,Arial,sans-serif}.wrap{max-width:980px;margin:0 auto;padding:24px 16px}
+    .box{background:#111714;border:1px solid #1f2c26;border-radius:14px;padding:18px}.muted{color:#98a5a0}.kpi{display:grid;grid-template-columns:repeat(3,minmax(120px,1fr));gap:10px;margin-top:14px}
+    .card{background:#0f1412;border:1px solid #1b2520;border-radius:12px;padding:12px}.v{font-size:1.2rem;color:#00ff88;font-weight:800}
+    .links{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.links a{color:#9fffd1;text-decoration:none;border:1px solid #1f3a30;border-radius:999px;padding:6px 10px}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <article class="box">
+      <h1>{{ brand }} {{ model }} : comparateur prix 2026</h1>
+      <p class="muted">{{ description }}</p>
+      <div class="kpi">
+        <div class="card"><div class="muted">Prix min</div><div class="v">{{ "%.2f"|format(price_min) }} €</div></div>
+        <div class="card"><div class="muted">Prix moyen</div><div class="v">{{ "%.2f"|format(price_avg) }} €</div></div>
+        <div class="card"><div class="muted">Prix max</div><div class="v">{{ "%.2f"|format(price_max) }} €</div></div>
+      </div>
+      <p>Sur un marché sneakers très fragmenté, comparer vite et correctement change directement la marge d'achat. Cette page dédiée {{ brand }} {{ model }} est conçue pour répondre à une question business simple : est-ce le bon moment et le bon canal d'achat ? Sneakerbot consolide les signaux prix observés sur des boutiques opérant en France, puis affiche une lecture claire des bornes du marché. Vous évitez les extrêmes, vous repérez les offres opportunistes et vous réduisez le risque de surpayer un modèle recherché. Cette approche est particulièrement utile quand les stocks tournent vite, que les pointures deviennent rares et que les promotions réelles sont noyées dans le bruit marketing. En pratique, commencez par le prix minimum observé pour identifier l'entrée la plus agressive, puis confrontez ce point au prix moyen afin d'évaluer la crédibilité de l'offre. Enfin, utilisez le prix maximum comme repère de plafond à ne pas dépasser. Si l'écart total reste raisonnable, la décision est plus simple. Si l'écart se creuse, il faut privilégier la prudence et recouper via le comparateur complet.</p>
+      <div class="links">
+        <a href="/comparison">Ouvrir le comparateur</a>
+        <a href="/search?brand={{ brand }}&model={{ model }}">Analyse rapide</a>
+        <a href="/blog/meilleures-sneakers-2026">Lire le blog</a>
+        {% for u in alternatives %}<a href="{{ u }}">Alternative</a>{% endfor %}
+      </div>
+    </article>
+  </main>
+</body>
+</html>

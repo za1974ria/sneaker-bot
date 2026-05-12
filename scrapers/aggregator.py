@@ -19,8 +19,22 @@ from typing import Any, Callable, Iterable
 from scrapers.base_scraper import BaseScraper
 from scrapers.hypermarches import HYPERMARCHE_SCRAPER_CLASSES_REGISTERED
 from scrapers.scraper_fr import FranceScraper
+from scrapers.source_robustness import (
+    dedupe_source_csv_rows,
+    is_stale_csv_timestamp,
+    normalize_price,
+    is_valid_price,
+    scrub_price_list,
+)
 from scrapers.tier1_sites import TIER1_ECOM_EXTRA_SCRAPER_CLASSES, TIER1_EXTRA_SCRAPER_CLASSES
 from scrapers.tier2_sites import TIER2_SCRAPER_CLASSES_REGISTERED
+from scrapers.precision_validator import validate_price_with_grok
+from scrapers.precision_engine import validate_price
+from scrapers.high_precision_core import (
+    get_cached_high_precision_prices,
+    run_high_precision_core,
+    should_rescrape_model,
+)
 
 # Sources « extra » FR = e-com Tier 1 + Tier 2 + hypers
 # (même ensemble que ``TIER1_EXTRA_SCRAPER_CLASSES``).
@@ -33,10 +47,33 @@ assert ALL_EXTRA_SCRAPERS_FR == TIER1_EXTRA_SCRAPER_CLASSES
 
 logger = logging.getLogger(__name__)
 
-# Cache résultats vides par source (clé string) — 6 h (pipeline FR).
+_PARASITIC_KEYWORDS: frozenset[str] = frozenset({
+    "kids", "junior", "enfant", "used", "occasion", "ebay", "vinted", "fake",
+})
+
+
+def _filter_by_median_bounds(prices: list[float]) -> list[float]:
+    """Rejette prix < 55 % ou > 165 % de la médiane (filtre standard)."""
+    if len(prices) < 2:
+        return prices
+    med = statistics.median(prices)
+    return [p for p in prices if med * 0.55 <= p <= med * 1.65]
+
+
+def _filter_by_median_bounds_strict(prices: list[float]) -> list[float]:
+    """Filtre premium TOP 30 : rejette prix < 60 % ou > 145 % de la médiane."""
+    if len(prices) < 2:
+        return prices
+    med = statistics.median(prices)
+    from app.top_models import TOP_30_MEDIAN_HIGH, TOP_30_MEDIAN_LOW
+    return [p for p in prices if med * TOP_30_MEDIAN_LOW <= p <= med * TOP_30_MEDIAN_HIGH]
+
+
+# Cache résultats vides par source (clé string) — 45 min (pipeline FR).
+# TTL court pour permettre aux scrapers de réessayer rapidement.
 _empty_cache: dict[str, float] = {}
 _EMPTY_CACHE_LOCK = Lock()
-EMPTY_TTL = 6 * 3600
+EMPTY_TTL = 45 * 60  # 45 minutes (était 6 h)
 
 
 def _is_empty_cached(name: str, brand: str, model: str) -> bool:
@@ -54,6 +91,10 @@ def _mark_empty(name: str, brand: str, model: str) -> None:
 
 _ai_supervisor_lock = Lock()
 _ai_supervisor_instance: Any = None
+
+# Mode bulk pipeline : skip validate_price dans _precision_fields_for_csv_row
+# (chaque appel = SQLite 5000 lignes + IsolationForest → 5s × 750 calls/run = 3750s overhead)
+_BULK_PIPELINE_SKIP_PRECISION: bool = False
 
 
 def _get_ai_supervisor() -> Any:
@@ -110,12 +151,26 @@ def _robust_price_aggregation(
     prices_final = [p for p in prices_valid if med * 0.4 <= p <= med * 2.0]
     if not prices_final:
         prices_final = list(prices_valid)
+    # Évite min=max=moy quand le bandeau autour de la médiane ne garde qu’un point alors que plusieurs prix valides existent
+    if len(prices_final) == 1 and len(prices_valid) > 1:
+        prices_final = list(prices_valid)
+    # Repli : plusieurs prix bruts mais un seul après filtres → garder la diversité (hors aberrations 10–2000 €)
+    if len(prices_final) == 1 and len(prices_f) > 1:
+        loose = [float(p) for p in prices_f if 10.0 <= float(p) <= 2000.0]
+        if len(loose) >= 2:
+            prices_final = loose
+
+    if len(prices_final) == 1:
+        logger.debug("[QUALITY] single valid price after all filters")
+
+    spread = (max(prices_final) - min(prices_final)) / max(med, 1.0)
+    avg_value = float(statistics.median(prices_final)) if spread >= 0.35 else float(statistics.mean(prices_final))
 
     return {
         "price_min": round(min(prices_final), 2),
         "price_max": round(max(prices_final), 2),
-        "price_avg": round(float(statistics.mean(prices_final)), 2),
-        "price_median": round(med, 2),
+        "price_avg": round(avg_value, 2),
+        "price_median": round(float(statistics.median(prices_final)), 2),
         "nb_sources": len(prices_final),
         "nb_ecartés": len(prices_f) - len(prices_final),
     }
@@ -206,24 +261,20 @@ def _fr_pipeline_model_timeout_sec() -> float:
         v = float(raw)
         return max(15.0, v)
     except ValueError:
-        return 180.0
+        # 50s : twall = max(35, 50-5) = 45s. 148 modèles / 4 workers × 50s = 1850s + 120×10 brands = 3050s
+        # Marge suffisante avant la soft limit Celery 3300s.
+        return 50.0
 
 
 def _fr_scraper_max_sites() -> int:
     """
-    Nombre max de sources FR interrogées par modèle (4 cœur + Tier 1 extra).
+    Nombre max de sources FR interrogées par modèle (8 par défaut).
     Surcharge : variable d'environnement FR_SCRAPER_MAX_SITES (entier ≥ 1).
     """
-    try:
-        from scrapers.tier1_sites import TIER1_EXTRA_SCRAPER_CLASSES
-
-        default_all = 4 + len(TIER1_EXTRA_SCRAPER_CLASSES)
-    except Exception:  # noqa: BLE001
-        default_all = 17
     raw = (os.environ.get("FR_SCRAPER_MAX_SITES") or "").strip()
     if raw.isdigit():
         return max(1, int(raw))
-    return default_all
+    return 8
 
 
 def _fr_tier1_display_names() -> tuple[str, ...]:
@@ -257,8 +308,27 @@ CSV_COLUMNS = [
     "price_median",
     "updated_at",
     "nb_sources",
+    "confidence_score",
+    "confidence_label",
+    "confidence_tier",
+    "tier_badge",
+    "price_q1",
+    "price_q3",
+    "outliers_low",
+    "outliers_high",
+    "anomaly_flags",
+    "market_stability",
+    "anomaly_score",
     "groq_valid",
     "groq_confidence",
+    "precision_confidence_score",
+    "precision_is_suspicious",
+    "precision_risk_level",
+    "precision_match_quality",
+    "precision_overall_reliability",
+    "precision_explanation",
+    "precision_suggested_price",
+    "precision_reasoning",
 ]
 
 SOURCES_CSV_COLUMNS = [
@@ -271,6 +341,14 @@ SOURCES_CSV_COLUMNS = [
     "price_avg",
     "price_count",
     "updated_at",
+    "precision_confidence_score",
+    "precision_is_suspicious",
+    "precision_risk_level",
+    "precision_match_quality",
+    "precision_overall_reliability",
+    "precision_explanation",
+    "precision_suggested_price",
+    "precision_reasoning",
 ]
 
 _LOCKS: dict[Path, Lock] = {}
@@ -353,19 +431,86 @@ def _groq_valid_bool_from_csv(val: Any) -> bool | None:
     return None
 
 
+def _precision_fields_for_csv_row(
+    *,
+    brand: str,
+    model: str,
+    market: str,
+    price_value: float,
+    site: str,
+) -> dict[str, Any]:
+    """Champs precision_* normalises pour CSV final/sources."""
+    if _BULK_PIPELINE_SKIP_PRECISION:
+        return {
+            "precision_confidence_score": "",
+            "precision_is_suspicious": "",
+            "precision_risk_level": "",
+            "precision_match_quality": "",
+            "precision_overall_reliability": "",
+            "precision_explanation": "",
+            "precision_suggested_price": "",
+            "precision_reasoning": "",
+        }
+    try:
+        p = validate_price(
+            {
+                "brand": brand,
+                "model": model,
+                "market": market,
+                "site": site,
+                "source": site,
+                "price": float(price_value),
+                "current_price": float(price_value),
+            }
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("precision_engine skip brand=%s model=%s site=%s: %s", brand, model, site, e)
+        p = {}
+    return {
+        "precision_confidence_score": p.get("confidence_score", ""),
+        "precision_is_suspicious": p.get("is_suspicious", ""),
+        "precision_risk_level": p.get("risk_level", ""),
+        "precision_match_quality": p.get("match_quality", ""),
+        "precision_overall_reliability": p.get("overall_reliability", ""),
+        "precision_explanation": p.get("explanation", ""),
+        "precision_suggested_price": p.get("suggested_price", ""),
+        "precision_reasoning": p.get("reasoning", ""),
+    }
+
+
 def _write_csv_rows(csv_path: Path, rows: Iterable[dict[str, Any]], *, fieldnames: list[str] | None = None) -> None:
+    """Écriture CSV atomique (fichier .tmp puis ``os.replace``) pour éviter fichiers tronqués.
+    Sauvegarde automatique .bak de la version précédente avant écrasement."""
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     cols = fieldnames or CSV_COLUMNS
-    with csv_path.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=cols)
-        writer.writeheader()
-        for row in rows:
-            if cols is CSV_COLUMNS:
-                r = dict(row)
-                _fill_market_fr_csv_row(r)
-                writer.writerow({k: r.get(k, "") for k in cols})
-            else:
-                writer.writerow(row)
+    tmp = csv_path.with_name(csv_path.name + ".tmp")
+    bak = csv_path.with_name(csv_path.name + ".bak")
+    try:
+        with tmp.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=cols)
+            writer.writeheader()
+            for row in rows:
+                if cols is CSV_COLUMNS:
+                    r = dict(row)
+                    _fill_market_fr_csv_row(r)
+                    writer.writerow({k: r.get(k, "") for k in cols})
+                else:
+                    writer.writerow({k: row.get(k, "") for k in cols})
+        # Sauvegarder la version précédente avant écrasement.
+        if csv_path.is_file():
+            try:
+                import shutil
+                shutil.copy2(csv_path, bak)
+            except OSError:
+                pass
+        os.replace(tmp, csv_path)
+    except Exception:
+        if tmp.is_file():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+        raise
 
 
 def _load_models_list() -> list[dict[str, str]]:
@@ -410,10 +555,19 @@ def _fr_one_item_impl(
     brand = item["brand"]
     model_name = item["model"]
     key = ModelKey(brand=brand, model=model_name)
+    # High-Precision Core cache-first: évite rescrape inutile si cache fiable/frais.
+    try:
+        if not should_rescrape_model(brand, model_name, market="FR"):
+            cached_prices = get_cached_high_precision_prices(brand, model_name, market="FR")
+            if cached_prices:
+                logger.info("HighPrecision cache hit %s %s (%d prix)", brand, model_name, len(cached_prices))
+                return key, list(cached_prices), {}, max(1, len(cached_prices)), None
+    except Exception as e:  # noqa: BLE001
+        logger.debug("HighPrecision cache gate skip %s %s: %s", brand, model_name, e)
     ms = _fr_scraper_max_sites()
     scraper = FranceScraper()
     by_site: dict[str, list[float]] = {}
-    twall = max(30.0, _fr_pipeline_model_timeout_sec() - 25.0)
+    twall = max(35.0, _fr_pipeline_model_timeout_sec() - 5.0)
     try:
         pairs = scraper._collect_parallel_fr_sites(
             brand,
@@ -446,8 +600,8 @@ def _fr_one_item_impl(
     try:
         from scrapers.sitemap_scraper import get_sitemap_prices
 
-        # Budget réseau strict pour ne pas faire dépasser le timeout global du modèle FR.
-        sitemap_prices = get_sitemap_prices(brand, model_name, max_wall_sec=70.0)
+        # Budget réseau strict : 10s (était 70s) pour rester sous wall_timeout global du modèle.
+        sitemap_prices = get_sitemap_prices(brand, model_name, max_wall_sec=10.0)
         if sitemap_prices:
             logger.info(
                 "Sitemap +%d prix pour %s %s",
@@ -484,7 +638,38 @@ def _fr_one_item_impl(
         logger.debug("Brand rules pre-Groq skip %s %s: %s", brand, model_name, e)
         prices_for_groq = list(agg_filtered)
 
-    prices, groq_meta = _apply_groq_price_filter(brand, model_name, prices_for_groq)
+    # En mode bulk pipeline, skip Groq (80-130s/modèle de latence API, aucun filtrage réel observé).
+    if item.get("skip_groq"):
+        prices, groq_meta = list(prices_for_groq), None
+    else:
+        prices, groq_meta = _apply_groq_price_filter(brand, model_name, prices_for_groq)
+    # High-Precision Core fusion: Source1 Google + Source2 Precision.
+    # En mode bulk pipeline (skip_groq=True), HP est aussi skippé : chaque appel validate_price
+    # lit 5000 lignes SQLite + entraîne IsolationForest → 70-116s/modèle avec 4 threads concurrents.
+    # confirm_scrape_fn=None : la confirmation (3ème source réseau) est désactivée dans le
+    # pipeline bulk pour éviter un deuxième scraping complet (wall_timeout 100s non borné).
+    if not item.get("skip_groq"):
+        try:
+            hp = run_high_precision_core(
+                brand=brand,
+                model=model_name,
+                market="FR",
+                scraped_prices=list(prices),
+                confirm_scrape_fn=None,
+            )
+            hp_prices = hp.get("prices") or []
+            if hp_prices:
+                prices = [float(x) for x in hp_prices]
+                logger.info(
+                    "HighPrecision core %s %s -> %d prix (reliability=%s, suspicious=%s)",
+                    brand,
+                    model_name,
+                    len(prices),
+                    hp.get("overall_reliability"),
+                    hp.get("suspicious"),
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("HighPrecision core skip %s %s: %s", brand, model_name, e)
     nb_sources = max(1, len(prices))
     return key, prices, by_site, nb_sources, groq_meta
 
@@ -514,20 +699,49 @@ def _fr_parallel_scrape(
     dict[ModelKey, dict[str, Any] | None],
 ]:
     """Scrape tous les modèles FR en parallèle (une instance FranceScraper par thread)."""
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
+
     out: dict[ModelKey, list[float]] = {}
     by_site_out: dict[ModelKey, dict[str, list[float]]] = {}
     nb_sources_map: dict[ModelKey, int] = {}
     groq_meta_map: dict[ModelKey, dict[str, Any] | None] = {}
     n = len(models)
     workers = min(MAX_FR_PARALLEL_WORKERS, max(1, n))
-    with ThreadPoolExecutor(max_workers=workers) as executor:
+    # Budget global : évite que le batch entier dépasse le task_time_limit Celery (3600s).
+    # ceil(n/workers) rounds × per_model_budget + 120s marge
+    import math
+    per_model_budget = _fr_pipeline_model_timeout_sec()
+    batch_timeout = math.ceil(n / max(1, workers)) * per_model_budget + 120.0
+    batch_timeout = min(batch_timeout, 3000.0)  # hard cap 50 min (< 3300s soft limit Celery)
+    print(f"[FR SCRAPE] START models={n} workers={workers} budget_per_model={per_model_budget:.0f}s batch_timeout={batch_timeout:.0f}s", flush=True)
+    executor = ThreadPoolExecutor(max_workers=workers)
+    try:
+        # skip_groq=True : Groq calls take 80-130s per model in bulk mode (API latency), saving ~100s/model
+        for item in models:
+            item["skip_groq"] = True
         futures = [executor.submit(_fr_one_item, item) for item in models]
-        for fut in as_completed(futures):
-            key, prices, by_site, nb_sources, groq_meta = fut.result()
-            out[key] = prices
-            by_site_out[key] = by_site
-            nb_sources_map[key] = nb_sources
-            groq_meta_map[key] = groq_meta
+        try:
+            for fut in as_completed(futures, timeout=batch_timeout):
+                try:
+                    key, prices, by_site, nb_sources, groq_meta = fut.result()
+                    out[key] = prices
+                    by_site_out[key] = by_site
+                    nb_sources_map[key] = nb_sources
+                    groq_meta_map[key] = groq_meta
+                    print(f"[FR SCRAPE] DONE {key.brand} {key.model} prices={len(prices)}", flush=True)
+                except Exception:  # noqa: BLE001
+                    pass
+        except FuturesTimeoutError:
+            logger.warning("[FR SCRAPE] batch_timeout %.0fs atteint — %d/%d modèles collectés, écriture CSV avec résultats partiels", batch_timeout, len(out), n)
+            print(f"[FR SCRAPE] TIMEOUT batch={batch_timeout:.0f}s collected={len(out)}/{n}", flush=True)
+    except RuntimeError:
+        # Python interpreter shutting down — abandon gracefully.
+        pass
+    finally:
+        # Non-blocking shutdown: don't block the brand pipeline waiting for slow threads.
+        # Lingering threads finish in the background; their results are already ignored.
+        executor.shutdown(wait=False)
+    print(f"[FR SCRAPE] COMPLETE collected={len(out)}/{n}", flush=True)
     return out, by_site_out, nb_sources_map, groq_meta_map
 
 
@@ -566,6 +780,9 @@ def _normalized_prices_for_stats(brand: str, prices: list[float]) -> list[float]
     min_allowed, max_allowed = BaseScraper.PRICE_RANGES.get(brand, BaseScraper.PRICE_RANGES["default"])
     in_range = [float(p) for p in prices if min_allowed <= float(p) <= max_allowed]
     if not in_range:
+        # Repli « fraîcheur » / plage : si tout est hors bornes marque, réutiliser les prix positifs scrubs
+        in_range = scrub_price_list(list(prices))
+    if not in_range:
         return []
 
     in_range.sort()
@@ -586,9 +803,77 @@ def _normalized_prices_for_stats(brand: str, prices: list[float]) -> list[float]
     # Si le filtre est trop agressif, fallback au core trimé.
     if len(cluster) >= 2:
         return cluster
+    # Un seul point dans la bande médiane mais plusieurs prix dans la plage marque → repli (évite min=max artificiel)
+    if len(cluster) == 1 and len(in_range) > 1:
+        return in_range
     if len(core) >= 2:
         return core
     return in_range
+
+
+def _compress_near_duplicates(prices: list[float], *, epsilon: float = 2.0) -> list[float]:
+    """
+    Déduplique les prix « proches » en conservant une valeur médiane par cluster.
+    Exemple: [99.9, 100.0, 100.2] -> [100.0]
+    """
+    vals = sorted(scrub_price_list(prices))
+    if not vals:
+        return []
+    if len(vals) == 1:
+        return vals
+    groups: list[list[float]] = []
+    current: list[float] = [vals[0]]
+    for v in vals[1:]:
+        if abs(v - current[-1]) <= epsilon:
+            current.append(v)
+        else:
+            groups.append(current)
+            current = [v]
+    groups.append(current)
+    out: list[float] = []
+    for g in groups:
+        out.append(round(float(median(g)), 2))
+    return out
+
+
+def _remove_iqr_outliers(prices: list[float]) -> tuple[list[float], int]:
+    """
+    Filtre IQR classique:
+    - retire prix < Q1 - 1.5*IQR ou > Q3 + 1.5*IQR
+    """
+    vals = sorted(scrub_price_list(prices))
+    if len(vals) < 4:
+        return vals, 0
+    try:
+        q1, _, q3 = statistics.quantiles(vals, n=4, method="inclusive")
+    except TypeError:
+        q1, _, q3 = statistics.quantiles(vals, n=4)
+    except (statistics.StatisticsError, ValueError):
+        return vals, 0
+    iqr = float(q3) - float(q1)
+    lower = float(q1) - 1.5 * iqr
+    upper = float(q3) + 1.5 * iqr
+    filtered = [p for p in vals if lower <= p <= upper]
+    if not filtered:
+        return vals, 0
+    return filtered, max(0, len(vals) - len(filtered))
+
+
+def _quality_score_from_triplet(nb_sources: int, price_min: float, price_max: float, price_avg: float) -> float:
+    """
+    Score interne (0..100), non persisté CSV.
+    Facteurs:
+    - volume de sources
+    - dispersion relative
+    - cohérence min/avg/max
+    """
+    src_score = min(40.0, max(0.0, float(nb_sources) * 5.0))
+    if price_avg <= 0:
+        return round(src_score, 2)
+    dispersion = max(0.0, (price_max - price_min) / max(price_avg, 1.0))
+    disp_score = max(0.0, 35.0 - min(35.0, dispersion * 100.0))
+    coh = 25.0 if (price_min <= price_avg <= price_max and price_min > 0) else 0.0
+    return round(src_score + disp_score + coh, 2)
 
 
 def _is_valid_triplet(brand: str, price_min: float, price_max: float, price_avg: float) -> bool:
@@ -741,23 +1026,199 @@ def diagnose_fr_requests_per_site(brand: str, model: str) -> None:
             print(f"  [{site_name}] erreur: {e}", flush=True)
 
 
-def run_market(market: str) -> None:
+def _checkpoint_brand_to_csv(
+    *,
+    brand_models: list[dict[str, str]],
+    fr_prices_by_key: dict[ModelKey, list[float]],
+    fr_prices_by_site: dict[ModelKey, dict[str, list[float]]],
+    fr_nb_sources: dict[ModelKey, int],
+    fr_groq_meta: dict[ModelKey, dict[str, Any] | None],
+    existing: dict[ModelKey, dict[str, Any]],
+    market_norm: str,
+    now: str,
+    csv_path: Path,
+    sources_csv_path: Path,
+    preserve_sources_csv: bool,
+) -> None:
+    """
+    Écrit un checkpoint CSV intermédiaire après le scraping d'une marque.
+    Fusionne les nouvelles lignes avec les lignes existantes du CSV (les autres marques
+    déjà présentes dans le fichier sont conservées intactes).
+    Appelé après chaque marque dans run_market() pour garantir que les données sont
+    persistées même si la task Celery est kill avant la fin du cycle complet.
+    """
+    manual_prices = _load_manual_prices()
+    brand_out_rows: list[dict[str, Any]] = []
+    brand_source_rows: list[dict[str, Any]] = []
+    google_fb_by_key: dict[ModelKey, bool] = {}
+
+    for item in brand_models:
+        brand = item["brand"]
+        model_name = item["model"]
+        key = ModelKey(brand=brand, model=model_name)
+        if any(kw in model_name.lower() for kw in _PARASITIC_KEYWORDS):
+            continue
+        last_row = existing.get(key)
+        prices = list(fr_prices_by_key.get(key) or [])
+        google_fb = False
+        # En mode bulk pipeline, on skip le fallback Google : init_google_cache() ouvre 3 connexions
+        # SQLite par appel (CREATE TABLE IF NOT EXISTS) → 20 × 3 = 60 ops sous contention des threads
+        # lingering → 155s de checkpoint pour Nike. En bulk, last_row (ligne 1151) est préférable :
+        # il préserve les precision_fields. Le fallback Google n'est utile qu'au tout premier run.
+        if not prices and not _BULK_PIPELINE_SKIP_PRECISION:
+            try:
+                from scrapers.google_price_fallback import try_google_cached_prices
+                gp = try_google_cached_prices(brand, model_name)
+                if gp:
+                    prices = list(gp)
+                    google_fb = True
+            except Exception:  # noqa: BLE001
+                pass
+        google_fb_by_key[key] = google_fb
+        raw_prices = list(prices)
+        scrubbed = scrub_price_list(raw_prices)
+        deduped = _compress_near_duplicates(scrubbed, epsilon=2.0)
+        prices_clean, _ = _remove_iqr_outliers(deduped)
+        if not prices_clean:
+            prices_clean = deduped
+        median_filtered = _filter_by_median_bounds(prices_clean)
+        if median_filtered:
+            prices_clean = median_filtered
+
+        by_site = fr_prices_by_site.get(key) or {}
+        cleaned_site_prices: dict[str, list[float]] = {}
+        for shop, pvals in by_site.items():
+            vals_raw = list(pvals or [])
+            vals_norm = scrub_price_list(vals_raw)
+            vals_dedup = _compress_near_duplicates(vals_norm, epsilon=2.0)
+            vals_final, _ = _remove_iqr_outliers(vals_dedup)
+            if not vals_final:
+                vals_final = vals_dedup
+            if vals_final:
+                cleaned_site_prices[shop] = vals_final
+        fr_prices_by_site[key] = cleaned_site_prices
+
+        if prices_clean:
+            rob = _robust_price_aggregation(brand, model_name, list(prices_clean))
+            if rob:
+                price_min = float(rob["price_min"])
+                price_max = float(rob["price_max"])
+                price_avg = float(rob["price_avg"])
+                price_median = float(rob["price_median"])
+                nb_src = max(1, int(rob["nb_sources"]))
+            else:
+                normalized = _normalized_prices_for_stats(brand, prices_clean)
+                pfs = scrub_price_list(normalized if normalized else list(prices_clean))
+                if not pfs:
+                    pfs = list(prices_clean)
+                price_min = round(min(pfs), 2)
+                price_max = round(max(pfs), 2)
+                price_avg = round(mean(pfs), 2)
+                price_median = round(float(median(pfs)), 2)
+                nb_src = max(1, fr_nb_sources.get(key, len(prices_clean)))
+            gv, gc = _groq_csv_fields(fr_groq_meta.get(key))
+            row_out: dict[str, Any] = {
+                "brand": brand, "model": model_name, "market": market_norm,
+                "price_min": price_min, "price_max": price_max,
+                "price_avg": price_avg, "price_median": price_median,
+                "updated_at": now, "nb_sources": str(nb_src),
+                "groq_valid": gv, "groq_confidence": gc,
+            }
+            row_out.update(_precision_fields_for_csv_row(
+                brand=brand, model=model_name, market=market_norm,
+                price_value=float(price_avg), site="aggregated_fr_pipeline",
+            ))
+            brand_out_rows.append(row_out)
+            for shop, prices_s in cleaned_site_prices.items():
+                if not prices_s:
+                    continue
+                norm_s = _normalized_prices_for_stats(brand, prices_s)
+                pfs_s = scrub_price_list(norm_s if norm_s else prices_s)
+                pfs_s = _compress_near_duplicates(pfs_s, epsilon=2.0)
+                pfs_s, _ = _remove_iqr_outliers(pfs_s)
+                if not pfs_s:
+                    continue
+                pmin_s = round(min(pfs_s), 2)
+                pmax_s = round(max(pfs_s), 2)
+                pmed_s = round(float(median(pfs_s)), 2)
+                spread_s = (pmax_s - pmin_s) / max(pmed_s, 1.0)
+                pavg_s = pmed_s if spread_s >= 0.35 else round(mean(pfs_s), 2)
+                brand_source_rows.append({
+                    "brand": brand, "model": model_name, "market": market_norm,
+                    "shop": shop, "price_min": pmin_s, "price_max": pmax_s,
+                    "price_avg": pavg_s, "price_count": len(pfs_s), "updated_at": now,
+                    **_precision_fields_for_csv_row(
+                        brand=brand, model=model_name, market=market_norm,
+                        price_value=float(pavg_s), site=shop,
+                    ),
+                })
+        elif last_row:
+            preserved = dict(last_row)
+            preserved["market"] = market_norm
+            preserved["updated_at"] = now
+            brand_out_rows.append(preserved)
+
+    if not brand_out_rows:
+        return
+
+    # Fusionne avec le CSV existant (lecture + merge + réécriture atomique).
+    current_rows = _read_existing_csv(csv_path)
+    for r in brand_out_rows:
+        k = ModelKey(brand=str(r.get("brand") or ""), model=str(r.get("model") or ""))
+        current_rows[k] = r
+    merged_rows = sorted(current_rows.values(), key=lambda r: (
+        str(r.get("brand") or "").lower(), str(r.get("model") or "").lower()
+    ))
+    _write_csv_rows(csv_path, merged_rows, fieldnames=CSV_COLUMNS)
+    logger.info(
+        "[CHECKPOINT] brand=%s rows=%d total_csv=%d",
+        brand_out_rows[0].get("brand", "?") if brand_out_rows else "?",
+        len(brand_out_rows), len(merged_rows),
+    )
+
+    # Sources CSV : même logique (merge avec existant, pas d'écrasement total).
+    if brand_source_rows:
+        current_sources: list[dict[str, Any]] = []
+        if sources_csv_path.is_file():
+            try:
+                with sources_csv_path.open("r", encoding="utf-8", newline="") as f:
+                    current_sources = list(csv.DictReader(f))
+            except Exception:
+                current_sources = []
+        brand_keys = {(r.get("brand"), r.get("model")) for r in brand_source_rows}
+        kept_sources = [r for r in current_sources if (r.get("brand"), r.get("model")) not in brand_keys]
+        merged_sources = kept_sources + brand_source_rows
+        merged_sources.sort(key=lambda r: (
+            str(r.get("brand") or "").lower(),
+            str(r.get("model") or "").lower(),
+            str(r.get("shop") or "").lower(),
+        ))
+        _write_csv_rows(sources_csv_path, merged_sources, fieldnames=SOURCES_CSV_COLUMNS)
+
+
+def run_market(market: str, *, preserve_sources_csv: bool = False) -> None:
     """
     Scrape one market and update CSV with min/max/avg.
 
     CSV columns:
       brand, model, market, price_min, price_max, price_avg, price_median, updated_at,
       nb_sources, groq_valid, groq_confidence
+
+    preserve_sources_csv=True : ne réécrit market_fr_sources.csv que si la nouvelle collecte
+    produit plus de lignes que l'existant (évite d'écraser un rebuild_fr_sources_csv récent).
     """
     market_norm = (market or "").strip().upper()
     if market_norm != "FR":
         raise ValueError("market must be FR")
-    logger.info("market=%s start", market_norm)
 
+    global _BULK_PIPELINE_SKIP_PRECISION
+    t_total_start = time.monotonic()
     csv_path = DATA_DIR / f"market_{market_norm.lower()}.csv"
     sources_csv_path = DATA_DIR / f"market_{market_norm.lower()}_sources.csv"
     lock = _get_lock_for_path(csv_path)
 
+    # Skip validate_price calls during bulk scrape run (5s × 750+ appels = 3750s overhead)
+    _BULK_PIPELINE_SKIP_PRECISION = True
     # Keep last known values
     with lock:
         existing = _read_existing_csv(csv_path)
@@ -780,15 +1241,78 @@ def run_market(market: str) -> None:
         # CSV and no prices are found, we skip it.
         out_rows: list[dict[str, Any]] = []
 
-        fr_prices_by_key, fr_prices_by_site, fr_nb_sources, fr_groq_meta = _fr_parallel_scrape(models)
+        # ── Brand-by-brand scraping ────────────────────────────────────────────
+        # Chaque marque = un lot indépendant. Budget par marque << budget global.
+        # Si une marque plante, les autres continuent. CSV checkpointé après chaque marque.
+        brands_order: list[str] = list(dict.fromkeys(item["brand"] for item in models))
+        brands_to_models: dict[str, list[dict[str, str]]] = {}
+        for item in models:
+            brands_to_models.setdefault(item["brand"], []).append(item)
+
+        fr_prices_by_key: dict[ModelKey, list[float]] = {}
+        fr_prices_by_site: dict[ModelKey, dict[str, list[float]]] = {}
+        fr_nb_sources: dict[ModelKey, int] = {}
+        fr_groq_meta: dict[ModelKey, dict[str, Any] | None] = {}
+
+        logger.info(
+            "[REFRESH] START market=%s brands=%d models=%d",
+            market_norm, len(brands_order), len(models),
+        )
+
+        for brand_name in brands_order:
+            brand_models = brands_to_models[brand_name]
+            t_brand = time.monotonic()
+            logger.info("[REFRESH] START brand=%s models=%d", brand_name, len(brand_models))
+            try:
+                b_prices, b_by_site, b_nb_src, b_groq = _fr_parallel_scrape(brand_models)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[REFRESH] ERROR brand=%s err=%s", brand_name, exc)
+                b_prices, b_by_site, b_nb_src, b_groq = {}, {}, {}, {}
+
+            fr_prices_by_key.update(b_prices)
+            fr_prices_by_site.update(b_by_site)
+            fr_nb_sources.update(b_nb_src)
+            fr_groq_meta.update(b_groq)
+
+            n_ok = sum(1 for v in b_prices.values() if v)
+            dur = time.monotonic() - t_brand
+            logger.info(
+                "[REFRESH] DONE brand=%s ok=%d/%d duration=%.0fs",
+                brand_name, n_ok, len(brand_models), dur,
+            )
+
+            # ── Checkpoint intermédiaire ────────────────────────────────────────
+            # Écrit les lignes déjà collectées dans le CSV (merge avec existant).
+            # Si la task Celery est kill avant la fin, les marques traitées sont sauvegardées.
+            try:
+                _checkpoint_brand_to_csv(
+                    brand_models=brand_models,
+                    fr_prices_by_key=fr_prices_by_key,
+                    fr_prices_by_site=fr_prices_by_site,
+                    fr_nb_sources=fr_nb_sources,
+                    fr_groq_meta=fr_groq_meta,
+                    existing=existing,
+                    market_norm=market_norm,
+                    now=now,
+                    csv_path=csv_path,
+                    sources_csv_path=sources_csv_path,
+                    preserve_sources_csv=preserve_sources_csv,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[REFRESH] checkpoint brand=%s skip: %s", brand_name, exc)
+        # ── Fin scraping par marque ────────────────────────────────────────────
         manual_prices = _load_manual_prices()
         source_rows: list[dict[str, Any]] = []
+        site_product_counts: dict[str, int] = {name: 0 for name in ACTIVE_SCRAPERS_FR}
+        quality_removed_invalid = 0
+        quality_removed_outliers = 0
+        quality_low_confidence = 0
+        source_quality_stats: dict[str, dict[str, int]] = {}
         # Monitoring scraper health (par run, par source).
         try:
             from app.scraper_monitor import init_scraper_monitor_db, upsert_scraper_health
 
             init_scraper_monitor_db()
-            site_product_counts: dict[str, int] = {name: 0 for name in ACTIVE_SCRAPERS_FR}
             for by_site in fr_prices_by_site.values():
                 for site_name, prices in (by_site or {}).items():
                     if prices:
@@ -804,10 +1328,16 @@ def run_market(market: str) -> None:
         except Exception as e:  # noqa: BLE001
             logger.warning("scraper_monitor skip: %s", e)
 
+        google_fb_by_key: dict[ModelKey, bool] = {}
+
         for item in models:
             brand = item["brand"]
             model_name = item["model"]
             key = ModelKey(brand=brand, model=model_name)
+
+            if any(kw in model_name.lower() for kw in _PARASITIC_KEYWORDS):
+                logger.info("[PARASITIC] modèle ignoré : %s %s", brand, model_name)
+                continue
 
             last_row = existing.get(key)
 
@@ -816,8 +1346,66 @@ def run_market(market: str) -> None:
             except Exception as e:  # noqa: BLE001
                 logger.exception("scrape failed market=%s brand=%s model=%s: %s", market_norm, brand, model_name, e)
                 prices = []
+            google_fb = False
+            # Google (cache) : uniquement si aucun prix issu des scrapers — ne pas dominer une collecte existante.
+            # En mode bulk pipeline, skip : last_row préserve les precision_fields ; init_google_cache()
+            # est trop coûteux (3 CREATE TABLE IF NOT EXISTS × N modèles sous contention SQLite).
+            if not prices and not _BULK_PIPELINE_SKIP_PRECISION:
+                from scrapers.google_price_fallback import try_google_cached_prices
+
+                gp = try_google_cached_prices(brand, model_name)
+                if gp:
+                    prices = list(gp)
+                    google_fb = True
+                    fr_prices_by_key[key] = list(prices)
+            google_fb_by_key[key] = google_fb
+            raw_prices = list(prices)
+            scrubbed_prices = scrub_price_list(raw_prices)
+            quality_removed_invalid += max(0, len(raw_prices) - len(scrubbed_prices))
+            deduped_prices = _compress_near_duplicates(scrubbed_prices, epsilon=2.0)
+            prices, outliers_removed = _remove_iqr_outliers(deduped_prices)
+            quality_removed_outliers += outliers_removed
+            if not prices:
+                prices = deduped_prices
+            median_filtered = _filter_by_median_bounds(prices)
+            if median_filtered:
+                prices = median_filtered
+            # TOP 30 : filtre médiane strict (60 % / 145 %) après filtre standard
+            try:
+                from app.top_models import TOP_30_MIN_SOURCES, is_top_model
+                if is_top_model(brand, model_name):
+                    strict_filtered = _filter_by_median_bounds_strict(prices)
+                    if strict_filtered:
+                        prices = strict_filtered
+                    if len(prices) < TOP_30_MIN_SOURCES:
+                        logger.warning(
+                            "[TOP30] sources insuffisantes %s %s: %d < %d",
+                            brand, model_name, len(prices), TOP_30_MIN_SOURCES,
+                        )
+            except Exception as _top_err:
+                logger.debug("top_models import skip: %s", _top_err)
+
+            # Nettoyage par source avant génération CSV source / stats santé.
+            cleaned_site_prices: dict[str, list[float]] = {}
+            for shop, pvals in (fr_prices_by_site.get(key) or {}).items():
+                vals_raw = list(pvals or [])
+                vals_norm = scrub_price_list(vals_raw)
+                vals_dedup = _compress_near_duplicates(vals_norm, epsilon=2.0)
+                vals_final, site_out = _remove_iqr_outliers(vals_dedup)
+                if not vals_final:
+                    vals_final = vals_dedup
+                sstat = source_quality_stats.setdefault(shop, {"total": 0, "invalid": 0, "outliers": 0})
+                sstat["total"] += len(vals_raw)
+                sstat["invalid"] += max(0, len(vals_raw) - len(vals_norm))
+                sstat["outliers"] += site_out
+                quality_removed_invalid += max(0, len(vals_raw) - len(vals_norm))
+                quality_removed_outliers += site_out
+                if vals_final:
+                    cleaned_site_prices[shop] = vals_final
+            fr_prices_by_site[key] = cleaned_site_prices
 
             if prices:
+                sources_count = len(fr_prices_by_site.get(key) or {})
                 rob = _robust_price_aggregation(brand, model_name, list(prices))
                 if rob:
                     price_min = float(rob["price_min"])
@@ -827,7 +1415,9 @@ def run_market(market: str) -> None:
                     nb_src = max(1, int(rob["nb_sources"]))
                 else:
                     normalized = _normalized_prices_for_stats(brand, prices)
-                    prices_for_stats = normalized if normalized else prices
+                    prices_for_stats = scrub_price_list(normalized if normalized else list(prices))
+                    if not prices_for_stats:
+                        prices_for_stats = list(prices)
                     price_min = round(min(prices_for_stats), 2)
                     price_max = round(max(prices_for_stats), 2)
                     price_avg = round(mean(prices_for_stats), 2)
@@ -836,29 +1426,132 @@ def run_market(market: str) -> None:
                     if nb_src < 1:
                         nb_src = max(1, len(prices))
                 gv, gc = _groq_csv_fields(fr_groq_meta.get(key))
+                quality_score = _quality_score_from_triplet(nb_src, price_min, price_max, price_avg)
 
-                out_rows.append(
+                # Score de confiance persisté en CSV (visible frontend sans recalcul)
+                _conf_result: dict[str, Any] = {}
+                try:
+                    from app.confidence_scorer import compute_confidence_score
+                    _gc_f: float | None = None
+                    if gc:
+                        try:
+                            _gc_f = float(gc)
+                        except (TypeError, ValueError):
+                            pass
+                    _gv_b: bool | None = True if gv == "true" else (False if gv == "false" else None)
+                    _conf_result = compute_confidence_score(
+                        nb_sources=nb_src,
+                        price_min=price_min,
+                        price_max=price_max,
+                        price_avg=price_avg,
+                        updated_at=now,
+                        groq_confidence=_gc_f,
+                        groq_valid=_gv_b,
+                        brand=brand,
+                        model=model_name,
+                    )
+                except Exception as _ce:
+                    logger.debug("confidence_score skip %s %s: %s", brand, model_name, _ce)
+
+                _tier_badge = "BRONZE"
+                try:
+                    from app.top_models import tier_badge_label as _tbl
+                    _tier_badge = _tbl(brand, model_name, int(_conf_result.get("score") or 0))
+                except Exception:
+                    pass
+
+                row_out: dict[str, Any] = {
+                    "brand": brand,
+                    "model": model_name,
+                    "market": market_norm,
+                    "price_min": price_min,
+                    "price_max": price_max,
+                    "price_avg": price_avg,
+                    "price_median": price_median,
+                    "updated_at": now,
+                    "nb_sources": str(nb_src),
+                    "confidence_score": str(_conf_result.get("score", "")),
+                    "confidence_label": str(_conf_result.get("label", "")),
+                    "confidence_tier": str(_conf_result.get("tier", "")),
+                    "tier_badge": _tier_badge,
+                    "groq_valid": gv,
+                    "groq_confidence": gc,
+                    "_quality_score": quality_score,
+                }
+                row_out.update(
+                    _precision_fields_for_csv_row(
+                        brand=brand,
+                        model=model_name,
+                        market=market_norm,
+                        price_value=float(price_avg),
+                        site="aggregated_fr_pipeline",
+                    )
+                )
+                # Precision Engine (Phase 1): validation IA post-extraction sur le prix agrégé.
+                prev_avg: float | None = None
+                prev_min: float | None = None
+                prev_max: float | None = None
+                if last_row:
+                    try:
+                        prev_avg = float(last_row.get("price_avg"))  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        prev_avg = None
+                    try:
+                        prev_min = float(last_row.get("price_min"))  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        prev_min = None
+                    try:
+                        prev_max = float(last_row.get("price_max"))  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        prev_max = None
+                history_for_ai = [x for x in (prev_min, prev_avg, prev_max) if x is not None]
+                precision_meta = validate_price_with_grok(
                     {
-                        "brand": brand,
-                        "model": model_name,
-                        "market": market_norm,
-                        "price_min": price_min,
-                        "price_max": price_max,
-                        "price_avg": price_avg,
-                        "price_median": price_median,
-                        "updated_at": now,
-                        "nb_sources": str(nb_src),
-                        "groq_valid": gv,
-                        "groq_confidence": gc,
+                        "title": f"{brand} {model_name}",
+                        "current_price": price_avg,
+                        "price_history": history_for_ai,
+                        "site": "aggregated_fr_pipeline",
                     }
                 )
+                row_out["_precision_confidence"] = precision_meta.get("confidence_score", "")
+                row_out["_precision_explanation"] = precision_meta.get("explanation", "")
+                row_out["_precision_flag"] = precision_meta.get("flag", "ok")
+                if row_out["_precision_flag"] == "suspicious":
+                    logger.warning(
+                        "[PrecisionEngine] suspicious row brand=%s model=%s price_avg=%.2f conf=%s explain=%s",
+                        brand,
+                        model_name,
+                        float(price_avg),
+                        row_out["_precision_confidence"],
+                        row_out["_precision_explanation"],
+                    )
+                if len(prices) == 1 and sources_count > 1:
+                    row_out["warning_single_price"] = True
+                if len(prices) < 2:
+                    row_out["_quality_flag"] = "low_confidence"
+                    quality_low_confidence += 1
+                    logger.warning(
+                        "[QUALITY] low_confidence brand=%s model=%s prices_valides=%d",
+                        brand,
+                        model_name,
+                        len(prices),
+                    )
+                out_rows.append(row_out)
                 if price_min < _price_floor_for_brand(brand):
                     logger.warning("Prix suspect détecté : %s %s min=%.2f", brand, model_name, price_min)
             else:
                 if last_row:
                     # Preserve last known values (do not overwrite with empties).
-                    # We still bump updated_at to now to indicate "checked".
+                    # Repli sur le dernier agrégat si aucun prix frais ce run.
                     preserved = dict(last_row)
+                    prev_ts = str(preserved.get("updated_at") or "")
+                    if is_stale_csv_timestamp(prev_ts):
+                        logger.info(
+                            "[freshness] repli dernier agrégat (données >24h avant ce run) brand=%s model=%s updated_at=%s",
+                            brand,
+                            model_name,
+                            prev_ts,
+                        )
                     preserved["market"] = market_norm
                     preserved["updated_at"] = now
                     out_rows.append(preserved)
@@ -895,6 +1588,26 @@ def run_market(market: str) -> None:
                         continue
 
         _apply_manual_prices(out_rows, market_norm, manual_prices)
+
+        # Garantit la propagation precision_* meme pour lignes preservees/manuelles.
+        for r in out_rows:
+            b = str(r.get("brand") or "").strip()
+            m = str(r.get("model") or "").strip()
+            try:
+                pa = float(r.get("price_avg"))
+            except (TypeError, ValueError):
+                pa = 0.0
+            if not b or not m or pa <= 0:
+                continue
+            for k, v in _precision_fields_for_csv_row(
+                brand=b,
+                model=m,
+                market=market_norm,
+                price_value=pa,
+                site="aggregated_fr_pipeline",
+            ).items():
+                if k not in r or r.get(k) in ("", None):
+                    r[k] = v
 
         # Durcissement final : aucune ligne incohérente ne doit sortir.
         for r in out_rows:
@@ -946,6 +1659,30 @@ def run_market(market: str) -> None:
                 except (TypeError, ValueError):
                     r["price_median"] = ""
 
+        from scrapers.reliability_meta import attach_reliability_metadata
+
+        for item in models:
+            b = item["brand"]
+            m = item["model"]
+            mk = ModelKey(brand=b, model=m)
+            row_match = next(
+                (
+                    row
+                    for row in out_rows
+                    if str(row.get("brand") or "").strip() == b and str(row.get("model") or "").strip() == m
+                ),
+                None,
+            )
+            if row_match is not None:
+                attach_reliability_metadata(
+                    row_match,
+                    brand=b,
+                    model=m,
+                    key=mk,
+                    fr_by_site=fr_prices_by_site,
+                    google_fallback_used=bool(google_fb_by_key.get(mk)),
+                )
+
         # Sources par boutique pour comparaison crédible frontend (type Trivago).
         for item in models:
             brand = item["brand"]
@@ -955,35 +1692,59 @@ def run_market(market: str) -> None:
                 if not prices:
                     continue
                 normalized = _normalized_prices_for_stats(brand, prices)
-                prices_for_stats = normalized if normalized else prices
+                prices_for_stats = scrub_price_list(normalized if normalized else list(prices))
+                prices_for_stats = _compress_near_duplicates(prices_for_stats, epsilon=2.0)
+                prices_for_stats, source_outliers = _remove_iqr_outliers(prices_for_stats)
+                quality_removed_outliers += source_outliers
+                if not prices_for_stats:
+                    continue
+                pmin = round(min(prices_for_stats), 2)
+                pmax = round(max(prices_for_stats), 2)
+                pmed = round(float(median(prices_for_stats)), 2)
+                spread = (pmax - pmin) / max(pmed, 1.0)
+                pavg = pmed if spread >= 0.35 else round(mean(prices_for_stats), 2)
                 source_rows.append(
                     {
                         "brand": brand,
                         "model": model_name,
                         "market": market_norm,
                         "shop": shop,
-                        "price_min": round(min(prices_for_stats), 2),
-                        "price_max": round(max(prices_for_stats), 2),
-                        "price_avg": round(mean(prices_for_stats), 2),
+                        "price_min": pmin,
+                        "price_max": pmax,
+                        "price_avg": pavg,
                         "price_count": len(prices_for_stats),
                         "updated_at": now,
+                        **_precision_fields_for_csv_row(
+                            brand=brand,
+                            model=model_name,
+                            market=market_norm,
+                            price_value=float(pavg),
+                            site=shop,
+                        ),
                     }
                 )
+
+        logger.debug("sources_csv_rows=%d", len(source_rows))
 
         # Durcissement des lignes sources : supprime toute incohérence résiduelle.
         strict_sources: list[dict[str, Any]] = []
         for r in source_rows:
             b = str(r.get("brand") or "").strip()
-            try:
-                pm = float(r.get("price_min"))
-                px = float(r.get("price_max"))
-                pa = float(r.get("price_avg"))
-            except (TypeError, ValueError):
+            pm = normalize_price(r.get("price_min"))
+            px = normalize_price(r.get("price_max"))
+            pa = normalize_price(r.get("price_avg"))
+            if not (is_valid_price(pm) and is_valid_price(px) and is_valid_price(pa)):
+                quality_removed_invalid += 1
                 continue
+            r["price_min"] = pm
+            r["price_max"] = px
+            r["price_avg"] = pa
             if not _is_valid_triplet(b, pm, px, pa):
+                quality_removed_invalid += 1
                 continue
             strict_sources.append(r)
-        source_rows = strict_sources
+        source_rows = dedupe_source_csv_rows(strict_sources)
+        logger.debug("after_dedupe source_rows=%d", len(source_rows))
 
         # Deterministic output (stable ordering)
         out_rows.sort(key=lambda r: (str(r.get("brand") or "").lower(), str(r.get("model") or "").lower()))
@@ -995,7 +1756,61 @@ def run_market(market: str) -> None:
             )
         )
         _write_csv_rows(csv_path, out_rows, fieldnames=CSV_COLUMNS)
-        _write_csv_rows(sources_csv_path, source_rows, fieldnames=SOURCES_CSV_COLUMNS)
+        print(f"[CSV WRITE] market rows={len(out_rows)} path={csv_path}", flush=True)
+
+        # Décision d'écriture sources CSV : si preserve_sources_csv=True, on ne réécrit que
+        # si on a collecté plus de lignes que le fichier existant (évite de dégrader un rebuild récent).
+        # Si le fichier n'existe pas, on écrit toujours (sinon il ne serait jamais créé).
+        existing_sources_count = 0
+        if preserve_sources_csv and sources_csv_path.is_file():
+            try:
+                with sources_csv_path.open("r", encoding="utf-8") as _f:
+                    existing_sources_count = sum(1 for _ in _f) - 1  # - header
+            except Exception:
+                existing_sources_count = 0
+
+        sources_file_missing = not sources_csv_path.is_file()
+        if not preserve_sources_csv or sources_file_missing or len(source_rows) >= max(existing_sources_count, 50):
+            _write_csv_rows(sources_csv_path, source_rows, fieldnames=SOURCES_CSV_COLUMNS)
+            print(f"[CSV WRITE] sources rows={len(source_rows)} path={sources_csv_path}", flush=True)
+        else:
+            logger.info(
+                "preserve_sources_csv: %d nouvelles lignes < %d existantes — sources CSV conservé",
+                len(source_rows),
+                existing_sources_count,
+            )
+
+        prices_total = sum(len(scrub_price_list(v)) for v in fr_prices_by_key.values())
+        src_ok = sum(1 for n in site_product_counts.values() if n > 0)
+        src_fail = max(0, len(site_product_counts) - src_ok)
+        logger.info(
+            "[QUALITY] lignes_supprimees_invalides=%d outliers_supprimes=%d low_confidence=%d",
+            quality_removed_invalid,
+            quality_removed_outliers,
+            quality_low_confidence,
+        )
+        for src_name, st in source_quality_stats.items():
+            total = int(st.get("total", 0))
+            invalid = int(st.get("invalid", 0))
+            if total <= 0:
+                continue
+            ratio = invalid / total
+            if ratio >= 0.40:
+                logger.warning(
+                    "[WARNING] Source unstable: %s (%.0f%% invalid)",
+                    src_name,
+                    ratio * 100.0,
+                )
+        t_total_dur = time.monotonic() - t_total_start
+        logger.info(
+            "[REFRESH] SUCCESS total_duration=%.0fs market=%s models=%d rows=%d sources_rows=%d scrapers_ok=%d",
+            t_total_dur, market_norm, len(models), len(out_rows), len(source_rows), src_ok,
+        )
+        print(
+            f"[REFRESH] SUCCESS total_duration={t_total_dur:.0f}s "
+            f"market={market_norm} rows={len(out_rows)} sources={len(source_rows)}",
+            flush=True,
+        )
 
         try:
             from app.price_history import purge_old_records, record_snapshot
@@ -1049,17 +1864,36 @@ def run_market(market: str) -> None:
         close_shared_browser()
     except Exception:  # noqa: BLE001
         pass
+
+    # Analyse anomalies post-scraping (IQR, outliers, stabilité marché)
+    try:
+        from app.anomaly_engine import run_anomaly_engine
+        run_anomaly_engine(market_csv=csv_path, sources_csv=sources_csv_path)
+        logger.info("anomaly_engine appliqué après scraping %s", market_norm)
+    except Exception as _ae:
+        logger.debug("anomaly_engine skip: %s", _ae)
+
+    _BULK_PIPELINE_SKIP_PRECISION = False
     logger.info("market=%s scraped/updated ok", market_norm)
 
 
-def rebuild_fr_sources_csv(*, max_sites: int | None = None, workers: int = MAX_FR_SOURCES_WORKERS) -> int:
+def rebuild_fr_sources_csv(
+    *,
+    max_sites: int | None = None,
+    workers: int = MAX_FR_SOURCES_WORKERS,
+    wall_timeout_sec: float | None = None,
+) -> int:
     """
     Reconstruit data/market_fr_sources.csv par boutique.
     max_sites=None → même limite que run_market (FR_SCRAPER_MAX_SITES / toutes les sources).
+    wall_timeout_sec : budget scrape par modèle (défaut 100 s ; 35 s recommandé pour rebuild batch).
     Retourne le nombre de lignes écrites.
     """
     if max_sites is None:
         max_sites = _fr_scraper_max_sites()
+    if wall_timeout_sec is None:
+        # Budget serré en rebuild batch : évite que Zalando/Playwright bloque 90 s par modèle
+        wall_timeout_sec = float(os.environ.get("FR_REBUILD_WALL_SEC", "35"))
     models = _load_models_list()
     if not models:
         return 0
@@ -1078,7 +1912,7 @@ def rebuild_fr_sources_csv(*, max_sites: int | None = None, workers: int = MAX_F
         scraper = FranceScraper()
         rows: list[dict[str, Any]] = []
         try:
-            by_site = scraper.scrape_model_by_site(b, m, max_sites=max_sites)
+            by_site = scraper.scrape_model_by_site(b, m, max_sites=max_sites, wall_timeout_sec=wall_timeout_sec)
         except Exception:  # noqa: BLE001
             by_site = {}
 
@@ -1087,16 +1921,25 @@ def rebuild_fr_sources_csv(*, max_sites: int | None = None, workers: int = MAX_F
                 if not prices:
                     continue
                 normalized = _normalized_prices_for_stats(b, prices)
-                p = normalized if normalized else prices
+                p = scrub_price_list(normalized if normalized else prices)
+                p = _compress_near_duplicates(p, epsilon=2.0)
+                p, _ = _remove_iqr_outliers(p)
+                if not p:
+                    continue
+                pmin = round(min(p), 2)
+                pmax = round(max(p), 2)
+                pmed = round(float(median(p)), 2)
+                spread = (pmax - pmin) / max(pmed, 1.0)
+                pavg = pmed if spread >= 0.35 else round(mean(p), 2)
                 rows.append(
                     {
                         "brand": b,
                         "model": m,
                         "market": market_norm,
                         "shop": shop,
-                        "price_min": round(min(p), 2),
-                        "price_max": round(max(p), 2),
-                        "price_avg": round(mean(p), 2),
+                        "price_min": pmin,
+                        "price_max": pmax,
+                        "price_avg": pavg,
                         "price_count": len(p),
                         "updated_at": (existing.get(key) or {}).get("updated_at") or now,
                     }
@@ -1124,10 +1967,202 @@ def rebuild_fr_sources_csv(*, max_sites: int | None = None, workers: int = MAX_F
 
     out: list[dict[str, Any]] = []
     max_workers = min(max(1, workers), len(models))
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = [ex.submit(one, item) for item in models]
-        for fut in as_completed(futures):
-            out.extend(fut.result())
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(one, item) for item in models]
+            for fut in as_completed(futures):
+                try:
+                    out.extend(fut.result())
+                except Exception:  # noqa: BLE001
+                    pass
+    except RuntimeError:
+        # Python interpreter shutting down — abandon gracefully.
+        pass
+
+    # Validation qualité prix — filtre les lignes invalides avant écriture
+    try:
+        from scrapers.price_validator import validate_price_row
+        validated_out: list[dict[str, Any]] = []
+        for row in out:
+            pmin = normalize_price(row.get("price_min"))
+            pmax = normalize_price(row.get("price_max"))
+            pavg = normalize_price(row.get("price_avg"))
+            vres = validate_price_row(
+                str(row.get("brand") or ""),
+                str(row.get("model") or ""),
+                pmin, pmax, pavg,
+            )
+            if not vres["valid"]:
+                logger.warning(
+                    "PRIX_INVALIDE: [%s] [%s] [%s] — %s",
+                    row.get("brand"), row.get("model"), row.get("shop"), vres["reason"],
+                )
+                continue
+            if vres["cleaned_avg"] != pavg and vres["cleaned_avg"] is not None:
+                row["price_avg"] = vres["cleaned_avg"]
+            validated_out.append(row)
+        if len(validated_out) < len(out):
+            logger.info("price_validator: %d/%d lignes retenues (%d invalides)",
+                        len(validated_out), len(out), len(out) - len(validated_out))
+        out = validated_out
+    except Exception:
+        logger.exception("price_validator import/apply error — lignes non filtrées")
+
+    # Enrichissement Google Shopping — gate conditionnel + budget lock (PA2)
+    try:
+        from app.google_shopping_verifier import (
+            get_all_shops_prices, init_google_cache,
+            is_shops_cache_fresh, read_serpapi_budget_mode,
+        )
+        init_google_cache()
+
+        # Index des shops déjà présents (évite doublons — scraper direct prioritaire)
+        existing_shops: set[tuple[str, str]] = {
+            (str(r.get("brand") or "").lower(), str(r.get("shop") or "").lower())
+            for r in out
+        }
+
+        # ── Stats par modèle depuis lignes scrappées (gate : spread/sources/prix) ──
+        _mkt: dict[tuple[str, str], dict[str, Any]] = {}
+        for _r in out:
+            _key = (str(_r.get("brand") or "").lower(), str(_r.get("model") or "").lower())
+            if _key not in _mkt:
+                _mkt[_key] = {"prices": [], "shops": set()}
+            _pa = _r.get("price_avg") or _r.get("price_min")
+            if _pa:
+                try:
+                    _mkt[_key]["prices"].append(float(_pa))
+                except (TypeError, ValueError):
+                    pass
+            _sh = str(_r.get("shop") or "").strip()
+            if _sh:
+                _mkt[_key]["shops"].add(_sh.lower())
+
+        # ── Budget mode global ─────────────────────────────────────────────────
+        _bgt = read_serpapi_budget_mode()
+        if _bgt == "stop":
+            logger.warning("[SERP GATE] budget_mode=stop — enrichissement SerpAPI bloqué globalement")
+
+        # ── Brands / keywords premium (gate condition E) ───────────────────────
+        _PREM_BRANDS = frozenset({"nike", "jordan", "yeezy", "new balance", "asics"})
+        _PREM_KW = frozenset({"samba", "yeezy", "jordan"})
+
+        google_rows: list[dict[str, Any]] = []
+        unique_models = list({(item["brand"], item["model"]) for item in models})
+
+        for b, m in unique_models:
+            try:
+                _bk = b.lower()
+                _mk = m.lower()
+                _st = _mkt.get((_bk, _mk), {})
+                _prices = sorted(_st.get("prices", []))
+                _sc = len(_st.get("shops", set()))
+
+                # ── Cache frais → appel direct (retour SQLite, zéro HTTP) ───────
+                if is_shops_cache_fresh(b, m):
+                    shops = get_all_shops_prices(b, m)
+                    for s in shops:
+                        shop_key = (b.lower(), s["shop"].lower())
+                        if shop_key in existing_shops:
+                            continue
+                        google_rows.append({
+                            "brand": b, "model": m, "market": market_norm,
+                            "shop": s["shop"], "price_min": s["price"],
+                            "price_max": s["price"], "price_avg": s["price"],
+                            "price_count": 1, "updated_at": now,
+                        })
+                        existing_shops.add(shop_key)
+                    continue  # pas besoin d'évaluer le gate
+
+                # ── Hard stop budget → aucun appel SerpAPI ────────────────────
+                if _bgt == "stop":
+                    logger.info("[SERP GATE] SKIP %s %s serp_skip_reason=budget_lock", b, m)
+                    continue
+
+                # ── Gate : évaluer si un appel SerpAPI est justifié ───────────
+                _allow = False
+                _reason = "healthy_market"
+                _is_prem = _bk in _PREM_BRANDS or any(kw in _mk for kw in _PREM_KW)
+
+                if _sc < 5:
+                    _allow = True
+                    _reason = "low_sources"
+                elif len(_prices) >= 2:
+                    _pmin = _prices[0]
+                    _pmax = _prices[-1]
+                    _pavg = sum(_prices) / len(_prices)
+                    _pmed = _prices[len(_prices) // 2]
+                    _spread = (_pmax - _pmin) / _pavg * 100 if _pavg > 0 else 0
+                    _m2m = _pmin / _pmed if _pmed > 0 else 1.0
+                    _m2a = abs(_pmin - _pavg) / _pavg * 100 if _pavg > 0 else 0
+
+                    if _spread > 45:
+                        _allow = True
+                        _reason = "high_spread"
+                    elif _m2m < 0.70:
+                        _allow = True
+                        _reason = "suspect_min"
+                    elif _m2a > 35:
+                        _allow = True
+                        _reason = "min_avg_gap"
+                    elif _is_prem:
+                        # brand premium ET confidence < 80 seulement
+                        _conf = 100
+                        try:
+                            from app.confidence_scorer import compute_confidence_score as _csc
+                            _conf = _csc(
+                                nb_sources=_sc,
+                                price_min=_pmin,
+                                price_max=_pmax,
+                                price_avg=_pavg,
+                                brand=b,
+                                model=m,
+                            ).get("score", 100)
+                        except Exception:
+                            pass
+                        if _conf < 80:
+                            _allow = True
+                            _reason = "premium_low_confidence"
+                        else:
+                            _reason = "premium_healthy"
+                    else:
+                        _reason = "enough_sources"
+                else:
+                    # Données insuffisantes pour juger → laisser SerpAPI enrichir
+                    _allow = True
+                    _reason = "insufficient_data"
+
+                # ── Essential mode : seulement si critique ────────────────────
+                if _allow and _bgt == "essential" and _sc >= 3 and _reason not in ("suspect_min", "low_sources", "premium_low_confidence"):
+                    _allow = False
+                    _reason = "budget_essential_skip"
+
+                if not _allow:
+                    logger.info("[SERP GATE] SKIP %s %s serp_skip_reason=%s", b, m, _reason)
+                    continue
+
+                logger.info("[SERP GATE] ALLOW %s %s reason=%s budget_mode=%s", b, m, _reason, _bgt)
+                shops = get_all_shops_prices(b, m)
+                for s in shops:
+                    shop_key = (b.lower(), s["shop"].lower())
+                    if shop_key in existing_shops:
+                        continue
+                    google_rows.append({
+                        "brand": b, "model": m, "market": market_norm,
+                        "shop": s["shop"], "price_min": s["price"],
+                        "price_max": s["price"], "price_avg": s["price"],
+                        "price_count": 1, "updated_at": now,
+                    })
+                    existing_shops.add(shop_key)
+
+            except Exception as _ge:  # noqa: BLE001
+                logger.debug("Google enrich %s %s: %s", b, m, _ge)
+
+        if google_rows:
+            logger.info("Google Shopping enrich: +%d lignes boutiques", len(google_rows))
+            out.extend(google_rows)
+    except Exception:  # noqa: BLE001
+        logger.exception("Google Shopping enrich — ignoré")
 
     out.sort(
         key=lambda r: (

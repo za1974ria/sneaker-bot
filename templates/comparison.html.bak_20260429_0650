@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sneakerbot — Comparateur Prix FR</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+{% raw %}
+    /* ═══════════════════════════════════════════════════════════
+       Sneakerbot Comparateur — Design Cockpit Premium
+    ═══════════════════════════════════════════════════════════ */
+
+    /* ── Base ── */
+    *{box-sizing:border-box}
+    body{
+      margin:0;background:#080808;color:#e2e2df;
+      font-family:-apple-system,ui-sans-serif,system-ui,"Segoe UI",Arial,sans-serif;
+      padding:28px 24px;font-size:14.5px;line-height:1.5;
+      -webkit-font-smoothing:antialiased;
+    }
+    .wrap{max-width:1160px;margin:0 auto}
+
+    /* ── Page header ── */
+    h1{
+      margin:0 0 3px;font-size:1.4rem;font-weight:800;
+      letter-spacing:-.03em;color:#f0f0ed;
+    }
+    .sub{color:#4b5563;margin:0 0 18px;font-size:.85rem}
+
+    /* ── Status bar ── */
+    .upd{
+      display:flex;align-items:center;flex-wrap:wrap;gap:6px;
+      color:#374151;margin:0 0 20px;font-size:.78rem;
+    }
+    .upd .spacer{flex:1;min-width:8px}
+    .upd-badge{
+      padding:2px 7px;border-radius:5px;font-size:.67rem;
+      font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+    }
+    .upd-fresh{background:rgba(0,230,118,.07);color:#34d399;border:1px solid rgba(0,230,118,.15)}
+    .upd-aging{background:rgba(251,191,36,.07);color:#fbbf24;border:1px solid rgba(251,191,36,.15)}
+    .upd-stale{background:rgba(239,68,68,.07);color:#f87171;border:1px solid rgba(239,68,68,.15)}
+    .job-idle{background:rgba(107,114,128,.07);color:#6b7280;border:1px solid rgba(107,114,128,.15)}
+    .job-run{background:rgba(0,230,118,.07);color:#34d399;border:1px solid rgba(0,230,118,.15)}
+    .clock-ok{background:rgba(0,230,118,.07);color:#34d399;border:1px solid rgba(0,230,118,.15)}
+    .clock-warning{background:rgba(251,191,36,.07);color:#fbbf24;border:1px solid rgba(251,191,36,.15)}
+    .clock-critical{background:rgba(239,68,68,.07);color:#f87171;border:1px solid rgba(239,68,68,.15)}
+    .logout-link{
+      color:#6b7280;text-decoration:none;
+      border:1px solid rgba(255,255,255,.06);border-radius:7px;
+      padding:4px 10px;font-size:.75rem;background:rgba(255,255,255,.02);
+      transition:color .15s,border-color .15s;
+    }
+    .logout-link:hover{color:#d1d5db;border-color:rgba(255,255,255,.12)}
+
+    /* ── KPI Band ── */
+    .kpi-band{
+      display:grid;grid-template-columns:repeat(3,1fr);
+      gap:12px;margin:0 0 12px;
+    }
+    .kpi-card{
+      background:#0d0d0d;
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:16px;padding:20px 22px 17px;
+      position:relative;overflow:hidden;
+      box-shadow:0 4px 28px rgba(0,0,0,.45),0 1px 0 rgba(255,255,255,.03) inset;
+    }
+    .kpi-card::after{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(0,230,118,.22),transparent);
+    }
+    .kpi-val{
+      font-size:1.9rem;font-weight:900;color:#00e676;
+      font-variant-numeric:tabular-nums;line-height:1;letter-spacing:-.05em;
+    }
+    .kpi-label{font-size:.77rem;color:#9ca3af;margin-top:8px;line-height:1.35;font-weight:500}
+    .kpi-sub{font-size:.66rem;color:#374151;margin-top:5px}
+
+    /* ── Insight Band (Résumé marché + Opportunité) ── */
+    .insight-band{
+      display:grid;grid-template-columns:1fr 1fr;
+      gap:12px;margin:0 0 10px;
+    }
+    .insight-card{
+      background:#0c0c0c;
+      border:1px solid rgba(255,255,255,.06);
+      border-radius:14px;padding:14px 18px 13px;
+      position:relative;overflow:hidden;
+      box-shadow:0 2px 16px rgba(0,0,0,.35);
+    }
+    .insight-card::after{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(0,230,118,.14),transparent);
+    }
+    .insight-title{
+      font-size:.58rem;font-weight:800;color:#4b5563;
+      letter-spacing:.08em;text-transform:uppercase;margin-bottom:9px;
+    }
+    .insight-row{
+      display:flex;justify-content:space-between;align-items:center;
+      font-size:.75rem;color:#6b7280;margin-bottom:4px;line-height:1.3;
+    }
+    .insight-row strong{color:#d1d5db;font-weight:700;font-variant-numeric:tabular-nums}
+    .ins-opp{margin-top:6px;font-size:.82rem;font-weight:700;line-height:1.5}
+
+    /* ── Product info compact ── */
+    #product-info{
+      display:none;flex-direction:row;align-items:center;gap:14px;
+      background:#0d0d0d;border:1px solid rgba(255,255,255,.05);
+      border-radius:12px;padding:10px 16px;margin:0 0 10px;
+    }
+    #product-info #product-image{width:56px;height:56px;object-fit:contain;border-radius:8px}
+    #product-info #product-name{font-size:.82rem;font-weight:700;color:#e2e2df}
+    #product-info #product-ref{font-size:.7rem;color:#4b5563;margin-top:2px}
+
+    /* ── Market health bar ── */
+    .mkt-health{
+      display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;
+      background:#0d0d0d;border:1px solid rgba(255,255,255,.04);
+      border-radius:9px;padding:8px 16px;margin:0 0 10px;font-size:.76rem;
+    }
+    .mkt-hl-title{
+      color:#374151;font-weight:700;letter-spacing:.07em;
+      text-transform:uppercase;font-size:.62rem;white-space:nowrap;
+    }
+    .mkt-hl-sep{color:#1f2937}
+    .mkt-hl-item{color:#6b7280;white-space:nowrap}
+    .mkt-hl-item strong{color:#00e676}
+
+    /* ── Scorecard ── */
+    .scorecard{
+      display:flex;align-items:center;justify-content:space-between;
+      gap:12px;background:#0d0d0d;border:1px solid rgba(255,255,255,.05);
+      border-radius:12px;padding:11px 16px;margin:0 0 12px;
+    }
+    .score-main{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+    .score-val{font-size:1rem;font-weight:700;color:#d1d5db}
+    .score-sub{color:#374151;font-size:.77rem}
+    .score-grade{
+      padding:3px 9px;border-radius:5px;font-size:.67rem;
+      font-weight:800;text-transform:uppercase;letter-spacing:.04em;
+    }
+    .g-premium{background:rgba(0,230,118,.09);color:#34d399}
+    .g-fiable{background:rgba(147,197,253,.09);color:#93c5fd}
+    .g-watch{background:rgba(251,191,36,.09);color:#fbbf24}
+    .g-risk{background:rgba(239,68,68,.09);color:#f87171}
+    .score-ctrl{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+    .sync-link{
+      color:#6b7280;text-decoration:none;
+      border:1px solid rgba(255,255,255,.06);border-radius:7px;
+      padding:5px 10px;font-size:.74rem;background:rgba(255,255,255,.02);cursor:pointer;
+      transition:color .15s,border-color .15s;
+    }
+    .sync-link:hover{color:#d1d5db;border-color:rgba(255,255,255,.12)}
+
+    /* ── Form ── */
+    .f{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}
+    .f select{
+      background:#0d0d0d;border:1px solid rgba(255,255,255,.08);
+      color:#e2e2df;border-radius:9px;padding:9px 12px;
+      font-family:inherit;font-size:.88rem;min-width:220px;
+      transition:border-color .15s;-webkit-appearance:none;appearance:none;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+      background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;
+    }
+    .f select:focus{outline:none;border-color:rgba(0,230,118,.3)}
+    .f button{
+      background:linear-gradient(135deg,#00b84a,#00e676);border:0;
+      color:#021408;border-radius:9px;padding:9px 18px;
+      font-weight:800;font-size:.88rem;cursor:pointer;transition:filter .15s;
+    }
+    .f button:hover{filter:brightness(1.08)}
+
+    /* ── Table ── */
+    .table-wrap{
+      width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;
+      border-radius:12px;border:1px solid rgba(255,255,255,.05);
+    }
+    table#cmp-table{
+      width:100%;min-width:1100px;border-collapse:collapse;
+      background:#090909;table-layout:auto;
+    }
+    th,td{padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.035);text-align:left}
+    table#cmp-table th.min,table#cmp-table th.moyen,table#cmp-table th.max{white-space:nowrap !important}
+    td.cmp-price{white-space:nowrap !important}
+    .cmp-price-inner{display:inline-block;white-space:nowrap !important;word-break:keep-all}
+    th{
+      font-size:.67rem;color:#374151;letter-spacing:.07em;
+      text-transform:uppercase;background:#080808;font-weight:700;
+      border-bottom:1px solid rgba(255,255,255,.05);
+    }
+    table#cmp-table tbody tr:hover{background:rgba(0,230,118,.025)}
+
+    /* ── Market state / filter note ── */
+    .cmp-market-state{display:block;margin-top:3px;font-size:.68rem;font-weight:600;line-height:1.25}
+    .cmp-market-state.stable{color:#22c55e}
+    .cmp-market-state.variable{color:#f59e0b}
+    .cmp-market-state.unstable{color:#ef4444}
+    .cmp-filter-note{display:block;margin-top:2px;font-size:.63rem;color:#2d3748;line-height:1.25}
+    .market-observation{font-size:.69rem;color:#374151;text-align:right;margin-top:3px;width:100%}
+    .market-observation.stable{color:#4ade80}
+    .market-observation.variable{color:#facc15}
+    .market-observation.unstable{color:#f87171}
+    tr.cmp-observation-row td{
+      padding-top:1px;padding-bottom:7px;
+      border-bottom:1px solid rgba(255,255,255,.035);vertical-align:top;
+    }
+
+    /* ── Pills ── */
+    .pill{padding:2px 8px;border-radius:5px;font-size:.68rem;font-weight:700}
+    .h{background:rgba(0,230,118,.07);color:#34d399}
+    .m{background:rgba(251,191,36,.07);color:#fbbf24}
+    .l{background:rgba(239,68,68,.07);color:#f87171}
+
+    /* ── Recommendation / position badges ── */
+    .badge-rec,.badge-pos{
+      display:inline-block;padding:3px 9px;border-radius:5px;
+      font-size:.68rem;font-weight:700;white-space:nowrap;
+      max-width:100%;overflow:hidden;text-overflow:ellipsis;
+    }
+    .rec-gold{background:rgba(255,215,0,.1);color:#fbbf24}
+    .rec-gm{background:rgba(0,230,118,.09);color:#34d399}
+    .rec-mkt{background:rgba(56,189,248,.09);color:#38bdf8}
+    .rec-high{background:rgba(249,115,22,.09);color:#fb923c}
+    .rec-ok{background:rgba(107,114,128,.09);color:#9ca3af}
+    .pos-t10{background:rgba(20,83,45,.3);color:#86efac}
+    .pos-t25{background:rgba(34,197,94,.08);color:#4ade80}
+    .pos-mid{background:rgba(30,64,175,.15);color:#93c5fd}
+    .pos-hi{background:rgba(194,65,12,.12);color:#fb923c}
+
+    /* ── Source badge ── */
+    .src-badge{
+      display:inline-flex;align-items:center;gap:0.28rem;
+      padding:0.16rem 0.48rem;border-radius:5px;font-size:.68rem;
+      font-weight:700;cursor:pointer;border:1px solid transparent;
+      white-space:nowrap;transition:opacity .15s;
+    }
+    .src-badge:hover{opacity:.7}
+    .sb-high{background:rgba(34,197,94,.07);color:#22c55e;border-color:rgba(34,197,94,.18)}
+    .sb-medium{background:rgba(249,115,22,.07);color:#f97316;border-color:rgba(249,115,22,.18)}
+    .sb-low{background:rgba(239,68,68,.07);color:#ef4444;border-color:rgba(239,68,68,.18)}
+    .sb-none{background:rgba(107,114,128,.07);color:#6b7280;border-color:rgba(107,114,128,.18)}
+
+    /* ── Action buttons ── */
+    .btn-cmp-hist{
+      background:rgba(0,230,118,.05);color:#4dff9f;
+      border:1px solid rgba(0,230,118,.18);border-radius:7px;
+      padding:4px 10px;font-size:.72rem;font-weight:700;cursor:pointer;
+      white-space:nowrap;transition:filter .15s,border-color .15s;
+    }
+    .btn-cmp-hist:hover{filter:brightness(1.25);border-color:rgba(0,230,118,.35)}
+    .btn-cmp-wa{
+      display:inline-flex;align-items:center;gap:4px;
+      background:rgba(37,211,102,.05);color:#25d366;
+      border:1px solid rgba(37,211,102,.18);border-radius:7px;
+      padding:4px 10px;font-size:.72rem;font-weight:700;
+      text-decoration:none;white-space:nowrap;transition:filter .15s;
+    }
+    .btn-cmp-wa:hover{filter:brightness(1.2)}
+
+    /* ── Mascotte ── */
+    #sb-mascotte-fixed{
+      position:fixed;top:16px;right:16px;z-index:5000;
+      display:flex;flex-direction:column;align-items:flex-end;gap:4px;pointer-events:none;
+    }
+    #sb-mascotte-fixed > *{pointer-events:auto}
+    #sb-mascotte-fixed .sb-mascotte-fixed-face{font-size:1.9rem;line-height:1;filter:drop-shadow(0 2px 8px rgba(0,0,0,.9))}
+    #sb-mascotte-fixed .sb-mascotte-fixed-badge{
+      font-size:.63rem;font-weight:800;color:#052818;background:#34d399;
+      border-radius:999px;padding:3px 9px;border:1px solid rgba(0,230,118,.3);white-space:nowrap;
+    }
+
+    /* ── Modals ── */
+    #src-modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;align-items:center;justify-content:center}
+    #src-modal-overlay.open{display:flex}
+    #src-modal{
+      background:#0d0d0d;border:1px solid rgba(255,255,255,.08);
+      border-radius:14px;padding:24px 28px;max-width:400px;width:90%;color:#e2e2df;
+    }
+    #src-modal h4{margin:0 0 14px;color:#00e676;font-size:.95rem;font-weight:800}
+    #src-modal ul{margin:0;padding:0 0 0 18px;font-size:.87rem;line-height:1.8;color:#9ca3af}
+    #src-modal-close{
+      margin-top:16px;background:rgba(0,230,118,.07);color:#34d399;
+      border:1px solid rgba(0,230,118,.2);border-radius:7px;padding:6px 14px;font-size:.78rem;cursor:pointer;
+    }
+
+    /* ── Hidden columns ── */
+    th:nth-child(5),td:nth-child(5),
+    th:nth-child(6),td:nth-child(6),
+    th:nth-child(7),td:nth-child(7),
+    th:nth-child(9),td:nth-child(9){display:none !important}
+
+    /* ── Responsive ── */
+    @media(max-width:768px){
+      body{padding:14px}
+      h1{font-size:1.15rem}
+      .sub{font-size:.82rem;margin-bottom:14px}
+      .kpi-band{grid-template-columns:1fr 1fr;gap:8px}
+      .kpi-val{font-size:1.35rem}
+      .kpi-card{padding:14px 15px 12px}
+      .insight-band{grid-template-columns:1fr;gap:8px}
+      .scorecard{flex-direction:column;align-items:flex-start}
+      .f{gap:7px}
+      .f select,.f button{width:100%;min-width:0}
+      table#cmp-table{min-width:720px}
+      th,td{padding:8px 10px;white-space:nowrap}
+      .upd{font-size:.74rem;margin-bottom:14px}
+      .mkt-health{font-size:.72rem}
+    }
+    @media(max-width:480px){
+      .kpi-band{grid-template-columns:1fr;gap:7px}
+    }
+    @media(max-width:375px){
+      .src-badge{font-size:.64rem;padding:.13rem .35rem}
+    }
+{% endraw %}
+  </style>
+</head>
+<body>
+{% if show_admin_topbar %}{% include 'partials/admin_topbar.html' %}{% endif %}
+  <div id="sb-mascotte-fixed" title="Suivi des prix sneakers — marché FR">
+    <span class="sb-mascotte-fixed-face" aria-hidden="true">👟</span>
+    <span class="sb-mascotte-fixed-badge">Prix FR</span>
+  </div>
+  <main class="wrap">
+    <h1>🛒 Comparateur FR multi-boutiques</h1>
+    <p class="sub">Comparaison crédible des prix sneakers/sport par boutique e-commerce opérant en France.</p>
+    <div class="upd">
+      <span>Dernière mise à jour : <strong>{{ last_update_label }}</strong></span>
+      <span class="upd-badge upd-{{ last_update_state }}">{{ state_label }}</span>
+      <span id="clockHealth" class="upd-badge clock-{{ clock_state }}">{{ clock_label }}</span>
+      <span id="jobStatus" class="upd-badge job-idle">idle</span>
+      <span class="spacer"></span>
+      <a class="logout-link" href="/logout">Deconnexion</a>
+    </div>
+    <div class="kpi-band">
+      <div class="kpi-card">
+        <div class="kpi-val" id="kpi-boutiques">487</div>
+        <div class="kpi-label">🏬 Boutiques analysées aujourd'hui</div>
+        <div class="kpi-sub">Couverture nationale FR</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val" id="kpi-models">148</div>
+        <div class="kpi-label">👟 Modèles suivis en temps réel</div>
+        <div class="kpi-sub">Catalogue actif & enrichi</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-val" style="color:#4dff9f;font-size:1rem;padding-top:6px;font-weight:900;letter-spacing:-.02em">🧠&nbsp;ACTIVE</div>
+        <div class="kpi-label">IA fiabilité marché</div>
+        <div class="kpi-sub">Analyse continue 24/7</div>
+      </div>
+    </div>
+    <div class="insight-band">
+      <div class="insight-card">
+        <div class="insight-title">📊 Résumé marché</div>
+        <div class="insight-row"><span>Prix moyen</span><strong id="ins-avg">—</strong></div>
+        <div class="insight-row"><span>Spread</span><strong id="ins-spread">—</strong></div>
+        <div class="insight-row"><span>Confiance</span><strong id="ins-conf">—</strong></div>
+      </div>
+      <div class="insight-card">
+        <div class="insight-title">🎯 Opportunité détectée</div>
+        <div id="ins-opp" class="ins-opp" style="color:#6b7280;font-size:.82rem">En attente de données…</div>
+      </div>
+    </div>
+    <div class="mkt-health">
+      <span class="mkt-hl-title">📈 Santé marché</span>
+      <span class="mkt-hl-sep">·</span>
+      <span class="mkt-hl-item">Tendance&nbsp;: <strong id="mkt-trend" style="color:#4dff9f">Stable</strong></span>
+      <span class="mkt-hl-sep">·</span>
+      <span class="mkt-hl-item">Liquidité&nbsp;: <strong id="mkt-liq" style="color:#ffd700">Moyenne</strong></span>
+      <span class="mkt-hl-sep">·</span>
+      <span class="mkt-hl-item">Score confiance&nbsp;: <strong id="mkt-conf">87/100</strong></span>
+    </div>
+    <div class="scorecard">
+      <div class="score-main">
+        <span class="score-val" id="scoreTotal">Score global commercial: --/100</span>
+        <span class="score-grade g-risk" id="scoreGrade">N/A</span>
+        <span class="score-sub" id="scoreMeta">En attente...</span>
+      </div>
+      <div class="score-ctrl">
+        <button type="button" id="copySyncLink" class="sync-link">Copier lien mobile</button>
+        <button type="button" id="shareWhatsApp" class="sync-link">Partager WhatsApp</button>
+      </div>
+    </div>
+    <form class="f" method="get" action="/comparison">
+      <select name="brand" id="brandSelect" style="background:#121212;border:1px solid #2a2a2a;color:#fff;border-radius:10px;padding:10px 12px;min-width:220px">{{ brand_options|safe }}</select>
+      <select name="model" id="modelSelect" style="background:#121212;border:1px solid #2a2a2a;color:#fff;border-radius:10px;padding:10px 12px;min-width:220px">{{ model_options|safe }}</select>
+      <button type="submit">Comparer</button>
+    </form>
+    <div id="product-info">
+      <img id="product-image" alt="">
+      <div>
+        <div id="product-name"></div>
+        <div id="product-ref"></div>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table id="cmp-table">
+        <thead><tr><th>Produit</th><th class="min">Min</th><th class="moyen">Moyen</th><th class="max">Max</th><th>Score</th><th>Crédibilité</th><th>Google</th><th>Recommandation</th><th>Position</th><th>Sources</th><th>Historique</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="11" style="color:#9ca3af">Chargement…</td></tr></tbody>
+      </table>
+    </div>
+  </main>
+  <div id="modal-history-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:12000;justify-content:center;align-items:center;padding:16px">
+    <div style="background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow-y:auto;position:relative">
+      <button type="button" onclick="window.__cmpCloseHistory && window.__cmpCloseHistory()" style="position:absolute;top:12px;right:12px;background:#333;color:#fff;border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;font-size:16px">✕</button>
+      <h3 style="color:#00ff88;margin:0 0 16px">📊 Historique des prix — <span id="history-modal-title"></span></h3>
+      <div id="history-modal-body"><p style="color:#666">Chargement...</p></div>
+    </div>
+  </div>
+<script>
+window.__CMP__ = {
+  catalog: {{ catalog_dict|tojson }},
+  selectedBrand: {{ selected_brand|tojson }},
+  selectedModel: {{ selected_model|tojson }},
+  waNumber: {{ wa_number|tojson }},
+  isAdmin: {{ is_admin|tojson }}
+};
+</script>
+<script src="/static/js/comparison_page.v2.js"></script>
+<script src="/static/product_display.js"></script>
+</body></html>

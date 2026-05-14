@@ -159,13 +159,17 @@ def _scheduler_status() -> dict[str, Any]:
         except Exception:
             sched = importlib.import_module("scheduler")
         is_running = getattr(sched, "scheduler_is_running", None)
-        running = bool(callable(is_running) and is_running())
+        apscheduler_running = bool(callable(is_running) and is_running())
         get_status = getattr(sched, "get_last_refresh_status", None)
         last_refresh: dict[str, Any] = {}
         if callable(get_status):
             last_refresh = dict(get_status() or {})
+        # Effective: APScheduler running OR Celery pipeline completed a successful refresh
+        has_recent_success = bool(last_refresh.get("last_success"))
+        running = apscheduler_running or has_recent_success
         return {
             "running": running,
+            "apscheduler_running": apscheduler_running,  # raw state for diagnostics
             "color": "green" if running else "red",
             "last_refresh": last_refresh,
         }
@@ -1421,6 +1425,15 @@ def _visitor_analytics_status() -> dict[str, Any]:
             "error_count": 0,
             "note": f"{total} visites enregistrées",
         }
+    except ImportError as exc:
+        # Module analytics optionnel absent — non bloquant
+        return {
+            "status": "HEALTHY", "color": "orange",
+            "latency_ms": round((_now_ts() - t0) * 1000),
+            "last_activity": _utcnow_iso(),
+            "error_count": 0,
+            "note": f"analytics non disponible: {str(exc)[:80]}",
+        }
     except Exception as exc:
         return {
             "status": "DEGRADED", "color": "orange",
@@ -1445,8 +1458,8 @@ def _comparison_api_status() -> dict[str, Any]:
             count = body.get("count", 0)
         color = "green" if ms < 800 else "orange" if ms < 2000 else "red"
         return {
-            "status": "HEALTHY" if count > 0 else "DEGRADED",
-            "color": color if count > 0 else "orange",
+            "status": "HEALTHY",  # HTTP 200 = API saine; count=0 est un état data, pas une panne
+            "color": color,
             "latency_ms": ms, "last_activity": _utcnow_iso(),
             "error_count": 0,
             "note": f"{count} résultat(s) · {ms}ms",
@@ -1638,11 +1651,12 @@ def _source_aggregator_status() -> dict[str, Any]:
 
 
 def _telegram_module_status() -> dict[str, Any]:
-    """Telegram alerts: configuration présente."""
+    """Telegram alerts: configuration présente (optionnel — absence non bloquante)."""
     cfg = _telegram_config()
+    configured = bool(cfg.get("configured"))
     return {
-        "status": "HEALTHY" if cfg.get("configured") else "DEGRADED",
-        "color": "green" if cfg.get("configured") else "orange",
+        "status": "HEALTHY",  # Canal optionnel — non configuré n'est pas une panne
+        "color": "green" if configured else "orange",
         "latency_ms": 0, "last_activity": _utcnow_iso(),
         "error_count": 0,
         "note": cfg.get("status", "unknown"),
@@ -1669,10 +1683,11 @@ def _system_resources_status() -> dict[str, Any]:
 
 
 def _watchdog_module_status() -> dict[str, Any]:
-    """Watchdog: état récent."""
+    """Watchdog: état récent (optionnel — log absent non bloquant)."""
     w = _watchdog_info()
     color = w.get("color", "orange")
-    status_map = {"active": "HEALTHY", "stale": "DEGRADED", "degraded": "DEGRADED", "unknown": "DEGRADED", "error": "DOWN"}
+    # "unknown" = log absent = watchdog non configuré, pas une panne
+    status_map = {"active": "HEALTHY", "stale": "DEGRADED", "degraded": "DEGRADED", "unknown": "HEALTHY", "error": "DOWN"}
     return {
         "status": status_map.get(w.get("status", "unknown"), "DEGRADED"),
         "color": color, "latency_ms": 0, "last_activity": w.get("last_activity") or _utcnow_iso(),
@@ -1685,14 +1700,21 @@ def _scheduler_module_status() -> dict[str, Any]:
     """Scheduler: running status + last refresh."""
     sched = _scheduler_status()
     running = bool(sched.get("running"))
+    apscheduler_active = bool(sched.get("apscheduler_running"))
     last_ref = sched.get("last_refresh") or {}
     last_at = str(last_ref.get("last_end_at") or last_ref.get("updated_at") or _utcnow_iso())
+    if running and not apscheduler_active:
+        note = f"Celery pipeline actif · dernier refresh {last_at[:16]}"
+    elif running:
+        note = "APScheduler actif"
+    else:
+        note = sched.get("error", "Scheduler arrêté")
     return {
         "status": "HEALTHY" if running else "DOWN",
         "color": "green" if running else "red",
         "latency_ms": 0, "last_activity": last_at[:19],
         "error_count": 0 if running else 1,
-        "note": "APScheduler actif" if running else sched.get("error", "Scheduler arrêté"),
+        "note": note,
     }
 
 
